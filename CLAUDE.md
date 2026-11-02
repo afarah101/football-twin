@@ -1,0 +1,22 @@
+# Football Twin
+
+Phase 1 plan and all decisions: `docs/phase-1-plan.md`.
+
+## Hard rules
+
+- No distance code runs and no metric output is produced or shown until Ahmed has committed `config/face_validity_pairs.yaml`.
+- Never suggest, draft or edit face validity pairs. Ahmed writes them.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues on `afarah101/football-twin`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five default labels. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
