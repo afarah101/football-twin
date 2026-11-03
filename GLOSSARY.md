@@ -71,3 +71,7 @@ _Avoid_: Basketball method, control
 **Self-match**:
 The test of whether a PlayerSeason's own next season appears in its top 10.
 _Avoid_: Backtest, stability
+
+**Blind spot-check**:
+The part of the outside review where a non-Claude model rates top-5 twin lists as plausible or not, on playing style alone. The reviewer sees player names and seasons, and has not seen our method, code or validation results.
+_Avoid_: Face validity

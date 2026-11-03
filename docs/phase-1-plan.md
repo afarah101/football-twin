@@ -38,7 +38,7 @@ Type a player and season. Get his 5 closest statistical twins, a 2D map and a fi
 ## Validation (not self-graded)
 1. Self-match: own next season in top 10 (exclusion lifted for this test). Compare with a random baseline.
 2. Stability: rank correlation when each metric is dropped.
-3. Blind spot-check, part of the outside review: a non-Claude model gets the metric tables and top-5 twins for 10 randomly chosen players (fixed seed) and rates each list as plausible or not, judging playing style only, not quality, fame or club. Report the count. Launch needs at least 7 of 10 rated plausible.
+3. Blind spot-check, part of the outside review: a non-Claude model gets the metric tables and top-5 twins for 10 randomly chosen players (fixed seed) and rates each list as plausible or not, judging playing style only, not quality, fame or club. The reviewer sees player names and seasons, because judging style needs football knowledge. It runs in a fresh session, before any code review. Report the count. Launch needs at least 7 of 10 rated plausible.
 4. Outside model reviews code and results.
 5. The winning distance method = highest self-match rate. Launch also needs the outside review.
 
@@ -107,6 +107,7 @@ These also override earlier decisions where they differ.
 - Position rule: a match row is "attacking" if any Pos label is FW, LW, RW or AM, else "other". Sub appearances ignored (Q5). A PlayerSeason joins the Pool if attacking minutes > other minutes.
 - The 6 codes are display-only: show the most frequent first-listed attacking label. Position is never used in distance.
 - Display labels: show FBref's own labels (FW, LW, RW, AM). Drop the 6 Understat codes while on the stand-in source.
+- STEP 0 answers the data questions from the stand-in files (worldfootballR Understat shot files, FBref positions and minutes, HF season totals). Live Understat checks wait until the "Understat is back" issue opens.
 - Ties: equal attacking and other minutes stays out of the Pool. Display-label tie: pick alphabetically.
 
 ### Site and code
@@ -117,6 +118,6 @@ These also override earlier decisions where they differ.
 - Q27: The pairs rule is literal and includes tests on made-up data. Every ticket touching distance is blocked by a ticket assigned to Ahmed. The Validation report refuses to run unless the file has 12 twin pairs and 5 not-twin pairs and is committed unchanged. Ahmed writes the pairs before looking at any metric output.
 - Metric output is not gated: trust in the results comes from the self-match test and the outside review. Reports may show per-player metric values.
 - Q28: A league-season joins the Pool on the first Monday job after its last scheduled match. Shortened seasons count as completed. The site shows the date of the last data update.
-- All test fixtures must be real Understat responses recorded during STEP 0. No invented or hand-written fixture data.
+- While on the stand-in source, test fixtures are small real samples cut from the stand-in files (real rows, never invented). Live Understat recordings replace them when Understat returns. This also covers Q26's Build seam and Q30's examples, except the real 404, which waits for live Understat. No invented or hand-written fixture data.
 - Q29: Two inputs fall outside the fixture rule because they are not Understat data. PASS, WEAK and FAIL bands are tested with plain rates. Connection failures and retries are simulated as no response at all, while real 404s are recorded. The site smoke test uses Build output from STEP 0 recordings.
 - Q30: STEP 0 records real examples of a mid-season league move, `Sub` appearances, an own goal, a player under 900 minutes, a current-season player and a real 404. If a case cannot be found on Understat, the ticket reports it and that test is left out. It is never invented.
