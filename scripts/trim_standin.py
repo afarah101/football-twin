@@ -3,11 +3,14 @@
 Usage: python3 scripts/trim_standin.py <folder holding the release assets> [output folder]
 
 Each original is checked against its SHA-256 before use. Shot, event and HF files keep every row, in source order.
-FBref positions combine five stat files per league, see combined_positions. Names stay exactly as stored. Reading
-.rds follows the plan's rdata rules. No network calls. The same originals and library versions give identical bytes.
+FBref positions combine five stat files per league, see combined_positions. Only their Pos can differ from the file a
+match came from, see majority_pos. club_map.csv links Understat and FBref clubs, see club_rows. Names stay exactly as
+stored. Reading .rds follows the plan's rdata rules. No network calls. The same originals and library versions give
+identical bytes.
 """
 import platform
 import sys
+from collections import Counter
 from pathlib import Path
 
 import pandas as pd
@@ -61,17 +64,39 @@ SHA256 = {
 }
 
 LEAGUES = ("ENG", "ESP", "FRA", "GER", "ITA")
-SHOT_FILES = ("bundesliga_shot_data.rds", "epl_shot_data.rds", "la_liga_shot_data.rds", "ligue_1_shot_data.rds", "serie_a_shot_data.rds")
+SHOT_FILE_OF_LEAGUE = {"ENG": "epl_shot_data.rds", "ESP": "la_liga_shot_data.rds", "FRA": "ligue_1_shot_data.rds", "GER": "bundesliga_shot_data.rds", "ITA": "serie_a_shot_data.rds"}
+SHOT_FILES = tuple(sorted(SHOT_FILE_OF_LEAGUE.values()))
 EVENT_FILES = ("ENG_M_1st_match_summary.csv", "ESP_M_1st_match_summary.rds", "FRA_M_1st_match_summary.rds", "GER_M_1st_match_summary.rds", "ITA_M_1st_match_summary.rds")
 # Measured order: the file that differs least from the other four on Pos comes first. See docs/reports/T7_trim.md.
 POSITION_KINDS = ("passing_types", "possession", "passing", "defense", "misc")
 NOT_STORED = {"ENG_M_1st_keeper_player_advanced_match_stats.rds": "No Pos column, and goalkeepers are out of scope."}
 
-SHOT_COLUMNS = ["id", "league", "season", "match_id", "date", "player", "player_id", "X", "Y", "xG", "situation", "shotType", "lastAction", "result"]
+SHOT_COLUMNS = ["id", "league", "season", "match_id", "date", "player", "player_id", "home_team", "away_team", "X", "Y", "xG", "situation", "shotType", "lastAction", "result"]
 POSITION_COLUMNS = ["MatchURL", "Match_Date", "Matchweek", "Season_End_Year", "Team", "Player", "Player_Href", "Pos", "Min"]
 EVENT_COLUMNS = ["MatchURL", "Match_Date", "Season_End_Year", "Team", "Event_Type", "Event_Players"]
 HF_TOTALS_COLUMNS = ["player_name", "team", "league", "season", "minutes", "goals", "assists", "shots", "key_passes", "xA", "npxG", "xGBuildup"]
 HF_MASTER_COLUMNS = ["player", "player_id", "league", "season", "squad", "pos", "min"]
+
+
+def majority_pos(kept, rows):
+    """Plan rule: the most common Pos across the files holding the match. On a tie, the chosen file's value stays.
+
+    Players match across files by the 8-character FBref id. An empty Pos is no vote. Pos is compared as stored, so
+    `FW,AM` and `AM,FW` are different values. Adds how many files voted and whether the top count was tied.
+    """
+    key = ["match_id", "player_id"]
+    votes = rows.loc[rows["Pos"] != "", [*key, "file_rank", "Pos"]].drop_duplicates([*key, "file_rank"])
+    counts = votes.groupby([*key, "Pos"]).size().rename("votes").reset_index()
+    tops = counts[counts["votes"] == counts.groupby(key)["votes"].transform("max")]
+    summary = tops.groupby(key).agg(winner=("Pos", "first"), winners=("Pos", "size"))
+    summary["Pos_Files_Voted"] = votes.groupby(key).size()
+    merged = kept.merge(summary.reset_index(), on=key, how="left")
+    winners = merged["winners"].fillna(0).astype("int64")
+    return merged.assign(
+        Pos=merged["winner"].where(winners == 1, merged["Pos"]),
+        Pos_Files_Voted=merged["Pos_Files_Voted"].fillna(0).astype("int64"),
+        Pos_Tie=winners > 1,
+    )
 
 
 def combined_positions(frames):
@@ -79,13 +104,14 @@ def combined_positions(frames):
 
     Files can give one player two hrefs in the same match, so mixing files inside a match would count that player twice.
     A match holding two URL spellings of its id keeps the spelling found in the most files. A match takes the file with
-    the most rows for it, then the most Min values, then the earliest in POSITION_KINDS. Returns the rows and the rows
-    taken from each file.
+    the most rows for it, then the most Min values, then the earliest in POSITION_KINDS. Pos then comes from majority_pos.
+    Returns the rows, the rows taken from each file, the rows after URL de-duplication and the rows whose Pos changed.
     """
     rows = pd.concat([frame.assign(file_rank=rank) for rank, frame in enumerate(frames)], ignore_index=True)
     rows["match_id"] = rows["MatchURL"].str.extract(r"/matches/([0-9a-f]{8})/", expand=False)
-    if rows["match_id"].isna().any():
-        raise SystemExit("a MatchURL holds no match id")
+    rows["player_id"] = rows["Player_Href"].str.extract(r"/players/([0-9a-f]{8})/", expand=False)
+    if rows[["match_id", "player_id"]].isna().any(axis=None):
+        raise SystemExit("a MatchURL or Player_Href holds no id")
     urls = rows.groupby(["match_id", "MatchURL"])["file_rank"].nunique().rename("files").reset_index()
     spellings = urls.sort_values(["files", "MatchURL"], ascending=[False, True]).drop_duplicates("match_id")["MatchURL"]
     rows = rows[rows["MatchURL"].isin(spellings)]
@@ -93,11 +119,13 @@ def combined_positions(frames):
     sizes = rows.groupby(["match_id", "file_rank"])["Min"].agg(["size", "count"]).reset_index()
     chosen = sizes.sort_values(["size", "count", "file_rank"], ascending=[False, False, True]).drop_duplicates("match_id")
     kept = rows.merge(chosen[["match_id", "file_rank"]], on=["match_id", "file_rank"])
-    if kept.duplicated(["MatchURL", "Player_Href"]).any():
+    if kept.duplicated(["match_id", "player_id"]).any():
         raise SystemExit("a player appears twice in one match")
-    kept = kept.sort_values(["Season_End_Year", "Match_Date", "MatchURL", "Team", "Player_Href"])
+    voted = majority_pos(kept, rows)
+    changed = int((voted["Pos"] != kept["Pos"]).sum())
+    kept = voted.sort_values(["Season_End_Year", "Match_Date", "MatchURL", "Team", "Player_Href"])
     taken = [int((kept["file_rank"] == rank).sum()) for rank in range(len(frames))]
-    return kept[POSITION_COLUMNS].reset_index(drop=True), taken, deduplicated
+    return kept[[*POSITION_COLUMNS, "Pos_Files_Voted", "Pos_Tie"]].reset_index(drop=True), taken, deduplicated, changed
 
 
 def write_trimmed(frame, target):
@@ -126,14 +154,47 @@ def trim_positions(league, originals, out):
         source_columns.append(frame.shape[1])
         # Min is text in some files and float in others. Both casts raise on anything that is not a whole number.
         frames.append(frame[POSITION_COLUMNS].assign(Min=pd.to_numeric(frame["Min"]).astype("Int64")))
-    kept, taken, deduplicated = combined_positions(frames)
+    kept, taken, deduplicated, changed = combined_positions(frames)
     write_trimmed(kept, out / trimmed)
     before = sum(len(frame) for frame in frames)
-    print(f"{league} positions rows: before {before}, after URL de-duplication {deduplicated}, after {len(kept)}", flush=True)
+    print(f"{league} positions rows: before {before}, after URL de-duplication {deduplicated}, after {len(kept)}, Pos changed by majority {changed}", flush=True)
     return [
         {"source": name, "rows": len(frame), "columns": columns, "kept_rows": count, "trimmed": trimmed}
         for name, frame, columns, count in zip(names, frames, source_columns, taken)
     ]
+
+
+def club_rows(league, out):
+    """Map Understat clubs to FBref clubs from the matches: same date, same pair of clubs.
+
+    Same names map first. Then each other club takes the FBref club most often found opposite an already mapped
+    opponent on the same date. A tied or absent count leaves the club unmapped. Clubs on one side only stay listed.
+    """
+    shots = pq.read_table(out / f"{Path(SHOT_FILE_OF_LEAGUE[league]).stem}.parquet", columns=["match_id", "date", "home_team", "away_team"]).to_pandas().drop_duplicates("match_id")
+    understat = [(date[:10], home, away) for date, home, away in zip(shots["date"], shots["home_team"], shots["away_team"])]
+    positions = pq.read_table(out / f"{league}_M_1st_positions.parquet", columns=["MatchURL", "Match_Date", "Team"]).to_pandas().drop_duplicates()
+    pairs = {(day, frozenset(teams)) for (day, _), teams in positions.groupby(["Match_Date", "MatchURL"])["Team"]}
+    if any(len(pair) != 2 for _, pair in pairs):
+        raise SystemExit(f"{league}: an FBref match does not hold two clubs")
+    understat_clubs = set(shots["home_team"]) | set(shots["away_team"])
+    fbref_clubs = set(positions["Team"])
+    mapping = {club: club for club in understat_clubs & fbref_clubs}
+    votes = Counter()
+    for day, home, away in understat:
+        for club, opponent in ((home, away), (away, home)):
+            if club not in mapping and opponent in mapping:
+                votes.update((club, next(iter(pair - {mapping[opponent]}))) for pair_day, pair in pairs if pair_day == day and mapping[opponent] in pair)
+    for club in sorted(understat_clubs - set(mapping)):
+        counts = sorted((count for (voted_club, _), count in votes.items() if voted_club == club), reverse=True)
+        if counts and (len(counts) == 1 or counts[0] > counts[1]):
+            mapping[club] = next(fbref for (voted_club, fbref), count in votes.items() if voted_club == club and count == counts[0])
+    linked = Counter()
+    for day, home, away in understat:
+        if home in mapping and away in mapping and (day, frozenset((mapping[home], mapping[away]))) in pairs:
+            linked.update((home, away))
+    rows = [(league, club, mapping.get(club, ""), mapping.get(club) == club, linked[club]) for club in sorted(understat_clubs)]
+    rows += [(league, "", club, False, 0) for club in sorted(fbref_clubs - set(mapping.values()))]
+    return rows
 
 
 def manifest(records, out):
@@ -162,7 +223,7 @@ Private. Not for publication. Generated by `scripts/trim_standin.py`, so do not 
 - Written with: {versions}, Python {platform.python_version()}. Identical bytes were checked on these versions only.
 - Repeat: `python3 scripts/trim_standin.py <folder holding the release assets>`.
 - Shot, event and HF files keep every source row, in source order.
-- Positions files combine five stat files per league. Each match comes whole from one file, so "Rows kept" is what that file gave. Rules and findings: `docs/reports/T7_trim.md`.
+- Positions files combine five stat files per league. Each match comes whole from one file, so "Rows kept" is what that file gave. Only `Pos` can differ from that file: it is the majority across the files holding the match. Rules and findings: `docs/reports/T7_trim.md`.
 
 ## Sources
 
@@ -175,6 +236,10 @@ Private. Not for publication. Generated by `scripts/trim_standin.py`, so do not 
 | File | Rows | Columns | Bytes | Kept columns |
 |---|---:|---:|---:|---|
 {chr(10).join(file_lines)}
+
+## Club map
+
+`club_map.csv`, SHA-256 `{sha256_of(out / "club_map.csv")}`. Built from the trimmed shot and positions files: same date, same pair of clubs. An empty club means no match on the other side.
 """
 
 
@@ -189,6 +254,8 @@ def main(originals, out):
     records += [trim_one(name, EVENT_COLUMNS, originals, out) for name in EVENT_FILES]
     records.append(trim_one("understat_xg_data.csv", HF_TOTALS_COLUMNS, originals, out))
     records.append(trim_one("master_player_stats.csv", HF_MASTER_COLUMNS, originals, out))
+    club_map = pd.DataFrame([row for league in LEAGUES for row in club_rows(league, out)], columns=["league", "understat_club", "fbref_club", "exact_name", "linked_matches"])
+    club_map.to_csv(out / "club_map.csv", index=False, encoding="utf8")
     (out / "MANIFEST.md").write_text(manifest(records, out), encoding="utf8")
 
 
