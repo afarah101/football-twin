@@ -2,9 +2,12 @@ name: understat-probe
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "17 7 * * *"
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   probe:
@@ -23,4 +26,15 @@ jobs:
           python -m pip install --no-deps --require-hashes -r "$RUNNER_TEMP/understatapi.txt"
           python -m pip install --no-deps --only-binary :all: certifi==2026.10.23 charset-normalizer==3.5.2 idna==3.20 requests==2.34.2 urllib3==2.8.0
       - name: Run one live call
+        id: probe
+        continue-on-error: true
         run: python scripts/probe_understat.py
+      - name: Open an issue when Understat answers
+        if: steps.probe.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          open_count=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 1000 --json title --jq '[.[] | select(.title == "Understat is back")] | length')
+          if [ "$open_count" -eq 0 ]; then
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "Understat is back" --body "The probe got HTTP 200 and rows: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          fi

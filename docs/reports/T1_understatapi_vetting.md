@@ -1134,3 +1134,24 @@ probe	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11
 probe	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:53.8266862Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
 probe	Complete job	2026-11-03T00:23:53.8882713Z Cleaning up orphan processes
 ```
+
+## Outage evidence
+
+Other projects report the same problem. All three pull requests were read on 2026-11-03 with `gh api repos/<owner>/<repo>/pulls/<n>`, and all were opened on 2026-11-02.
+
+| Pull request | State | What it reports |
+|---|---|---|
+| [AkshitPareek/fpl-lineup-optimizer#32](https://github.com/AkshitPareek/fpl-lineup-optimizer/pull/32) | Closed, not merged | Requests time out from Cloud Run and from a local machine. |
+| [hediblk/football-predictions#81](https://github.com/hediblk/football-predictions/pull/81) | Merged | On 2 November, all five league endpoints and the EPL page still time out. |
+| [fantasy-database/fantasy-database.github.io#15](https://github.com/fantasy-database/fantasy-database.github.io/pull/15) | Merged | GitHub's servers could not look up understat.com, and a second run three minutes later failed the same way. Other sites were fine. |
+
+What this changes:
+
+- **An outage on Understat's side is now the likeliest explanation.** Unrelated projects on different networks report failures from 2 November, and our two failures are on 3 November.
+- **The home failure may be the same outage, not a Virgin Media block.** A whole /24 failed from home, which could fit a hosting-side network problem. This is an inference and was not tested.
+- **The symptoms differ.** One project reports failed DNS lookups, while our probes resolved the name and then could not connect. All of them got no answer from the site.
+- **The hotspot test is now worth less,** because it would probably fail too. The daily watch in `.github/workflows/understat-probe.yml` replaces it for finding out when the site returns.
+
+These are other project authors' reports, not a statement from Understat. The cause and expected return date are unknown.
+
+The verdict in this report does not change: UNSURE, and not safe to wire in at ticket 5 until a live call passes.

@@ -1,6 +1,6 @@
-"""One live Understat call, to test whether GitHub Actions can reach the site (issues #2 and #13).
+"""One live Understat call, to watch whether GitHub Actions can reach the site (issues #2 and #13).
 
-Prints field names only: no values, no player names, no row counts. Saves nothing.
+Exits 0 only on HTTP 200 with rows. Prints field names only: no values, no player names, no row counts. Saves nothing.
 """
 import sys
 
@@ -47,7 +47,7 @@ def main() -> int:
         print("shot row field names:", sorted(rows[0]))
     elif rows:
         print("unexpected rows type:", type(rows).__name__)
-    return 0 if rows else 1
+    return 0 if statuses == [200] and rows else 1
 
 
 if __name__ == "__main__":
