@@ -86,6 +86,8 @@ These override the plan above where they differ.
 - Q20: The Basketball method uses the same 10 shrunk metrics and replaces only the z-score and clip step with percentiles. It appears in the validation report, not on the public site.
 - Q21: The stability test is report-only, with no pass or fail. Any metric whose removal changes the rankings most is flagged for the outside review.
 - Q22: The outside review is a non-Claude model on a free tier, such as Gemini. It sees code and results, never raw Understat data. It runs once, after validation and before launch, in addition to the evaluator skill.
+- Face-validity pairs dropped. Validation = self-match test (40% target, PASS/WEAK/FAIL bands) + non-Claude outside review. This overrides Q11 and Q27.
+- Names-only mode is no longer needed for future reports.
 
 ### Data source
 - Q13: `understatapi` goes through vetting steps 1–5 in `~/sandbox`. No other library is considered unless it fails. It sits behind one adapter that adds the 2-second delay and retries.

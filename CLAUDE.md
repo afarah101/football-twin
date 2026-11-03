@@ -4,7 +4,6 @@ Phase 1 plan and all decisions: `docs/phase-1-plan.md`.
 
 ## Hard rules
 
-- No distance code runs and no metric output is produced or shown until Ahmed has committed `config/face_validity_pairs.yaml`.
 - Never suggest, draft or edit face validity pairs. Ahmed writes them.
 
 ## Agent skills
