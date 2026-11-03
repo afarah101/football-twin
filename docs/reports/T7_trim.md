@@ -13,13 +13,13 @@ Run date: 2026-11-03. Issue: #7. Repo position at the first trim: `39b1c3a`, lev
 | Nothing is fetched from the network | **Met**: both runs had network access denied |
 | Counts per league-season match the STEP 0 coverage report | **Met, with one stated exception**: ITA 2023/24 goes from 383 to 379 URLs, because the de-duplication asked for removes 4 spellings. All other counts match. |
 
-**Ready for #6: YES, on one condition.** #6 must not apply rule 2 on an exact-date link. An exact-date link would treat 16 matches as having no FBref minutes when FBref does hold them, and drop 384 good shot rows. See the first finding.
+**Ready for #6: YES.** The date link is decided and `data/standin/` holds what it needs. The club map still needs Ahmed's review, but no unmapped club has a Pool-season match.
 
 ## Findings
 
 | Severity | Finding | Section |
 |---|---|---|
-| Warning, **needs Ahmed** | Rule 2 and dates. In Pool seasons, 19 Understat matches have no FBref match on the same date with the same pair of clubs. Only 3 are really missing from FBref (73 shot rows). The other 16 are in FBref under another date (384 shot rows), mostly 1 day apart, and up to 11 days for re-dated matches. Suggested for #6: link on the same pair in the same season, taking the nearest FBref date not used by the pair's other match. | 10 |
+| Warning for #6 | Rule 2 must use the decided link, not an exact date. An exact-date link leaves 19 Pool matches unmatched. The decided link leaves 3 (73 shot rows), which are really missing from FBref. The other 16 (384 shot rows) link with gaps of 1, 2 or 11 days. | 10 |
 | Warning, **needs Ahmed to review** | Club map: 43 mappings are not exact name matches, and 14 clubs are unmapped. All 14 are Understat-only clubs, and none has a Pool-season match. Both lists are in section 9. Two to look at: `Real Oviedo` to `Oviedo` rests on 4 matches, and `Parma` and `Parma Calcio 1913` both reach `Parma`. | 9 |
 | Warning | Combining per player would have been wrong. One player can have different hrefs in different files for one match, which gives 201 cases of one name counted twice in a team's match, and team-match minutes up to 1170. Each match therefore comes whole from one file, and the maximum is 990. | 4 |
 | Warning | Majority `Pos` matches players by the 8-character id only, as asked. A player with different ids in different files gets fewer votes, which `Pos_Files_Voted` shows. | 4 |
@@ -39,12 +39,12 @@ Run date: 2026-11-03. Issue: #7. Repo position at the first trim: `39b1c3a`, lev
 **Decided by Ahmed, now in the plan's Stand-in source decisions:**
 
 1. Tie-breaker matches are excluded from minutes and shots, by filtering on `Matchweek`. #6 does this. The shot file has no rows on that date, so only minutes change.
-2. Pool seasons only (2017/18-2023/24): shot rows for matches with no FBref minutes are dropped, and #6 reports the rows per league-season. 2014/15-2016/17 shot rows stay unchanged. `home_team` and `away_team` are back in the shot files for this.
+2. Pool seasons only (2017/18-2023/24): shot rows for matches with no FBref minutes are dropped, and #6 reports the rows per league-season. 2014/15-2016/17 shot rows stay unchanged. **The date link is decided:** same home club and same away club, in that order, in the same season, nearest FBref date, at most 14 days. Over 14 days is no link, and the rows are dropped and counted. #6 records `date_gap_days` on every linked row and lists every gap over 1 day. `home_team` and `away_team` in the shot files, and `Home_Team` and `Away_Team` in the positions files, are there for this.
 3. One player under two FBref ids merges only when name, team and season match and their matches never overlap. #6 does this and lists every merge. Before merging, #6 should note that Strefezza's two ids total 1113 minutes.
 4. Majority `Pos`. The trim applies it, because `data/standin/` holds one `Pos` per row and #6 would have nothing to count. Each row records `Pos_Files_Voted` and `Pos_Tie`.
 5. #6 re-cuts `tests/fixtures/standin/` from `data/standin/`. Those fixtures still hold the original schema.
 
-**Open for Ahmed:** the rule 2 date link in the first finding, and the club map review in section 9.
+**Open for Ahmed:** the club map review in section 9.
 
 ## Step 0
 
@@ -88,15 +88,15 @@ epl_shot_data.parquet	107838	16	1785331
 la_liga_shot_data.parquet	100188	16	1666821
 ligue_1_shot_data.parquet	96140	16	1610098
 serie_a_shot_data.parquet	110026	16	1824619
-ENG_M_1st_positions.parquet	83613	11	415800
+ENG_M_1st_positions.parquet	83613	13	425249
 ENG positions rows: before 413736, after URL de-duplication 413736, after 83613, Pos changed by majority 3
-ESP_M_1st_positions.parquet	87400	11	451661
+ESP_M_1st_positions.parquet	87400	13	460470
 ESP positions rows: before 421890, after URL de-duplication 421890, after 87400, Pos changed by majority 0
-FRA_M_1st_positions.parquet	79421	11	418507
+FRA_M_1st_positions.parquet	79421	13	426753
 FRA positions rows: before 395313, after URL de-duplication 395313, after 79421, Pos changed by majority 0
-GER_M_1st_positions.parquet	69868	11	352235
+GER_M_1st_positions.parquet	69868	13	359567
 GER positions rows: before 348924, after URL de-duplication 348924, after 69868, Pos changed by majority 0
-ITA_M_1st_positions.parquet	87300	11	447784
+ITA_M_1st_positions.parquet	87300	13	456423
 ITA positions rows: before 425429, after URL de-duplication 425045, after 87300, Pos changed by majority 0
 ENG_M_1st_match_summary.parquet	37734	6	283373
 ESP_M_1st_match_summary.parquet	44873	6	324327
@@ -120,12 +120,13 @@ Not stored: `ENG_M_1st_keeper_player_advanced_match_stats.rds`. It has no `Pos` 
 
 | Source | Kept | Why | Dropped |
 |---|---|---|---|
-| Shot files, 5 | `id`, `league`, `season`, `match_id`, `date`, `player`, `player_id` | Identity, league-season, names are not unique | `minute`, `h_a`, `home_away`, `home_goals`, `away_goals`, `player_assisted` |
+| Shot files, 5 | `id`, `league`, `season`, `match_id`, `date`, `player`, `player_id` | Identity, league-season, names are not unique | `minute`, `h_a`, `home_away`, `home_goals`, `away_goals`, `player_assisted`. No planned metric uses `minute`, so section 11 reads it from the original. |
 | | `home_team`, `away_team` | Rule 2 links shots to FBref matches, and the club map | |
 | | `X`, `Y` | Box shares, Q16 | |
 | | `xG` | npxG per shot | |
 | | `situation`, `shotType`, `lastAction`, `result` | Metrics, Q15, npg | |
 | FBref positions, 5 files per league | `MatchURL`, `Match_Date`, `Season_End_Year`, `Team` | Identity, league-season | Passing, defence and other match stats |
+| | `Home_Team`, `Away_Team` | The date link in rule 2 needs the order | |
 | | `Matchweek` | Picks out the tie-breaker | |
 | | `Player`, `Player_Href` | Name, FBref id | |
 | | `Pos`, `Min` | Position rule, 900-minute gate, per-90 | |
@@ -140,7 +141,7 @@ Names are stored exactly as in the source, with no entity decoding: 2308 shot ro
 
 ```
 ### schema of Season_End_Year in event files {'ENG': 'int64', 'ESP': 'int32', 'FRA': 'int32', 'GER': 'int32', 'ITA': 'int32'}
-schema of positions ['MatchURL:large_string', 'Match_Date:large_string', 'Matchweek:large_string', 'Season_End_Year:int32', 'Team:large_string', 'Player:large_string', 'Player_Href:large_string', 'Pos:large_string', 'Min:int64', 'Pos_Files_Voted:int64', 'Pos_Tie:bool']
+schema of positions ['MatchURL:large_string', 'Match_Date:large_string', 'Matchweek:large_string', 'Season_End_Year:int32', 'Home_Team:large_string', 'Away_Team:large_string', 'Team:large_string', 'Player:large_string', 'Player_Href:large_string', 'Pos:large_string', 'Min:int64', 'Pos_Files_Voted:int64', 'Pos_Tie:bool']
 schema of shots ['id:double', 'league:large_string', 'season:double', 'match_id:double', 'date:large_string', 'player:large_string', 'player_id:double', 'home_team:large_string', 'away_team:large_string', 'X:double', 'Y:double', 'xG:double', 'situation:large_string', 'shotType:large_string', 'lastAction:large_string', 'result:large_string']
 FBref files holding a player_id column: 0 of 25
 lastAction text None in trimmed shots: 59088
@@ -435,7 +436,7 @@ For Ahmed to review: every unmapped club and every mapping that is not an exact 
 
 ## 10. Rule 2 links
 
-Using that map on Pool-season matches, with an exact date. `DATE DIFFERS` means FBref holds the pair on a date not used by the pair's other match in that season. `NOT IN FBREF` means it does not.
+The decided link, from the plan: same home club and same away club, in that order, in the same season, nearest FBref date, at most 14 days. The tie-breaker is left out first, because rule 1 excludes it and otherwise Spezia v Hellas Verona appears twice.
 
 ```
 ### H. club map and rule 2 links, Pool seasons
@@ -488,39 +489,102 @@ not exact:
 exact but 0 linked: [('ITA', 'Parma')]
 FBref clubs reached by 2+ Understat names: {('ITA', 'Parma'): 2}
 mapped on under 10 linked matches: [('ESP', 'Real Oviedo', 'Oviedo', '4')]
-Pool-season Understat matches with no FBref match on the same date and pair: league, season, date, clubs, shot rows, nearest FBref date for the pair (season), days apart
-  ENG 2018 2018-08-25 Fulham v Burnley | rows 37 | FBref dates for pair ['2018-08-26', '2019-01-12'] | DATE DIFFERS 2018-08-26
-  ENG unlinked by season {2018: 1} of 2660 matches
-  ESP 2017 2017-09-16 Eibar v Leganes | rows 15 | FBref dates for pair ['2017-09-15', '2018-02-10'] | DATE DIFFERS 2017-09-15
-  ESP 2017 2017-10-23 Celta Vigo v Atletico Madrid | rows 23 | FBref dates for pair ['2017-10-22', '2018-03-11'] | DATE DIFFERS 2017-10-22
-  ESP 2017 2017-11-05 Barcelona v Sevilla | rows 26 | FBref dates for pair ['2017-11-04', '2018-03-31'] | DATE DIFFERS 2017-11-04
-  ESP 2021 2022-05-15 Espanyol v Valencia | rows 23 | FBref dates for pair ['2022-05-14', '2021-12-31'] | DATE DIFFERS 2022-05-14
-  ESP 2023 2023-12-12 Granada v Athletic Club | rows 27 | FBref dates for pair ['2023-12-11', '2024-04-19'] | DATE DIFFERS 2023-12-11
-  ESP unlinked by season {2017: 3, 2021: 1, 2023: 1} of 2660 matches
-  FRA 2017 2018-04-14 Caen v Toulouse | rows 14 | FBref dates for pair ['2018-04-25', '2017-12-09'] | DATE DIFFERS 2018-04-25
-  FRA 2017 2018-05-12 Guingamp v Marseille | rows 38 | FBref dates for pair ['2018-05-11', '2017-11-26'] | DATE DIFFERS 2018-05-11
-  FRA 2021 2022-02-02 Lyon v Marseille | rows 21 | FBref dates for pair ['2022-02-01', '2022-05-01'] | DATE DIFFERS 2022-02-01
-  FRA 2022 2023-04-30 Strasbourg v Lyon | rows 18 | FBref dates for pair ['2023-04-28', '2023-01-14'] | DATE DIFFERS 2023-04-28
-  FRA 2023 2023-08-12 Nice v Lille | rows 20 | FBref dates for pair ['2023-08-11', '2024-05-19'] | DATE DIFFERS 2023-08-11
-  FRA 2023 2023-08-12 Brest v Lens | rows 25 | FBref dates for pair ['2023-08-13', '2024-03-09'] | DATE DIFFERS 2023-08-13
-  FRA unlinked by season {2017: 2, 2021: 1, 2022: 1, 2023: 2} of 2485 matches
-  GER 2021 2022-03-18 Bochum v Borussia M.Gladbach | rows 24 | FBref dates for pair ['2021-10-31'] | NOT IN FBREF 
-  GER unlinked by season {2021: 1} of 2142 matches
-  ITA 2017 2018-01-28 Sassuolo v Atalanta | rows 27 | FBref dates for pair ['2018-01-27', '2017-09-10'] | DATE DIFFERS 2018-01-27
-  ITA 2017 2018-01-28 Chievo v Juventus | rows 17 | FBref dates for pair ['2018-01-27', '2017-09-09'] | DATE DIFFERS 2018-01-27
-  ITA 2020 2020-09-19 Verona v Roma | rows 29 | FBref dates for pair ['2021-01-31'] | NOT IN FBREF 
-  ITA 2023 2024-04-14 Udinese v Roma | rows 28 | FBref dates for pair ['2024-04-25', '2023-11-26'] | DATE DIFFERS 2024-04-25
-  ITA 2023 2024-05-24 Cagliari v Fiorentina | rows 25 | FBref dates for pair ['2024-05-23', '2023-10-02'] | DATE DIFFERS 2024-05-23
-  ITA 2023 2024-06-02 Atalanta v Fiorentina | rows 20 | FBref dates for pair ['2023-09-17'] | NOT IN FBREF 
-  ITA unlinked by season {2017: 2, 2020: 1, 2023: 3} of 2660 matches
-not in FBref: matches 3 rows 73 | date differs: matches 16 rows 384
+Link: same home club and same away club in the same season, nearest FBref date, at most 14 days. Tie-breaker left out.
+home or away null 0 | matches whose Home_Team and Away_Team differ from Team 0
+ordered pairs twice in one season, FBref: [] | Understat: []
+Pool matches 12607 | linked 12604 | no link 3 | gap days to matches {0: 12588, 1: 13, 2: 1, 11: 2}
+links with a gap above 0: gap, league, Understat date, clubs, FBref date, shot rows
+  (11, 'FRA', '2018-04-14', 'Caen', 'Toulouse', '2018-04-25', 14)
+  (11, 'ITA', '2024-04-14', 'Udinese', 'Roma', '2024-04-25', 28)
+  (2, 'FRA', '2023-04-30', 'Strasbourg', 'Lyon', '2023-04-28', 18)
+  (1, 'ENG', '2018-08-25', 'Fulham', 'Burnley', '2018-08-26', 37)
+  (1, 'ESP', '2017-09-16', 'Eibar', 'Leganes', '2017-09-15', 15)
+  (1, 'ESP', '2017-10-23', 'Celta Vigo', 'Atletico Madrid', '2017-10-22', 23)
+  (1, 'ESP', '2017-11-05', 'Barcelona', 'Sevilla', '2017-11-04', 26)
+  (1, 'ESP', '2022-05-15', 'Espanyol', 'Valencia', '2022-05-14', 23)
+  (1, 'ESP', '2023-12-12', 'Granada', 'Athletic Club', '2023-12-11', 27)
+  (1, 'FRA', '2018-05-12', 'Guingamp', 'Marseille', '2018-05-11', 38)
+  (1, 'FRA', '2022-02-02', 'Lyon', 'Marseille', '2022-02-01', 21)
+  (1, 'FRA', '2023-08-12', 'Nice', 'Lille', '2023-08-11', 20)
+  (1, 'FRA', '2023-08-12', 'Brest', 'Lens', '2023-08-13', 25)
+  (1, 'ITA', '2018-01-28', 'Sassuolo', 'Atalanta', '2018-01-27', 27)
+  (1, 'ITA', '2018-01-28', 'Chievo', 'Juventus', '2018-01-27', 17)
+  (1, 'ITA', '2024-05-24', 'Cagliari', 'Fiorentina', '2024-05-23', 25)
+no link, rows dropped: league, season end year, date, clubs, rows, nearest same-order date
+  ('GER', 2022, '2022-03-18', 'Bochum', 'Borussia M.Gladbach', 24, [])
+  ('ITA', 2021, '2020-09-19', 'Verona', 'Roma', 29, [])
+  ('ITA', 2024, '2024-06-02', 'Atalanta', 'Fiorentina', 20, [])
+rows dropped 73
 ```
 
-The 3 matches not in FBref are the 2 gaps T3 reported and the ITA 2023/24 gap in section 6.
+The 3 matches with no link are the 2 gaps T3 reported and the ITA 2023/24 gap in section 6.
+
+**The 16-match table, rebuilt from `data/standin/` only.** The first version of this table took home and away from a cache of the originals. This rebuild reads only `data/standin/`, and compares the result with that table, typed into the script:
+
+```
+$ table16.py data/standin
+('FRA', '2018-04-14', 'Caen', 'Toulouse', '2018-04-25', 11, 14)
+  ('ITA', '2024-04-14', 'Udinese', 'Roma', '2024-04-25', 11, 28)
+  ('FRA', '2023-04-30', 'Strasbourg', 'Lyon', '2023-04-28', 2, 18)
+  ('ENG', '2018-08-25', 'Fulham', 'Burnley', '2018-08-26', 1, 37)
+  ('ESP', '2017-09-16', 'Eibar', 'Leganes', '2017-09-15', 1, 15)
+  ('ESP', '2017-10-23', 'Celta Vigo', 'Atletico Madrid', '2017-10-22', 1, 23)
+  ('ESP', '2017-11-05', 'Barcelona', 'Sevilla', '2017-11-04', 1, 26)
+  ('ESP', '2022-05-15', 'Espanyol', 'Valencia', '2022-05-14', 1, 23)
+  ('ESP', '2023-12-12', 'Granada', 'Athletic Club', '2023-12-11', 1, 27)
+  ('FRA', '2018-05-12', 'Guingamp', 'Marseille', '2018-05-11', 1, 38)
+  ('FRA', '2022-02-02', 'Lyon', 'Marseille', '2022-02-01', 1, 21)
+  ('FRA', '2023-08-12', 'Nice', 'Lille', '2023-08-11', 1, 20)
+  ('FRA', '2023-08-12', 'Brest', 'Lens', '2023-08-13', 1, 25)
+  ('ITA', '2018-01-28', 'Sassuolo', 'Atalanta', '2018-01-27', 1, 27)
+  ('ITA', '2018-01-28', 'Chievo', 'Juventus', '2018-01-27', 1, 17)
+  ('ITA', '2024-05-24', 'Cagliari', 'Fiorentina', '2024-05-23', 1, 25)
+rebuilt rows 16 | shown rows 16 | in both 16 | only rebuilt [] | only shown []
+matches 12607 linked 12604 no link [('GER', '2022-03-18', 'Bochum', 'Borussia M.Gladbach', 24), ('ITA', '2020-09-19', 'Verona', 'Roma', 29), ('ITA', '2024-06-02', 'Atalanta', 'Fiorentina', 20)]
+table matches what was shown: True
+```
+
+**The two 11-day gaps are verified real re-dates.** Ahmed verified both, and that check is recorded here. It was not repeated from the data files, which only show the dates.
+
+| Match | Understat date | FBref date | What happened |
+|---|---|---|---|
+| Caen v Toulouse, 2017/18 | 2018-04-14 | 2018-04-25 | Postponed for weather, 14 to 25 Apr 2018 |
+| Udinese v Roma, 2023/24 | 2024-04-14 | 2024-04-25 | Suspended at 72' and finished on 25 Apr 2024 |
+
+## 11. Udinese v Roma 2023/24: shot minutes
+
+`minute` is not in `data/standin/`, so this reads the original `serie_a_shot_data.rds`, with both `pyreadr` and `rdata`.
+
+```
+pyreadr: rows 28 | match_id [22621.0] | dates ['2024-04-14 16:00:00']
+minutes sorted [8, 14, 15, 16, 20, 22, 25, 31, 38, 48, 50, 55, 58, 60, 62, 62, 63, 67, 67, 78, 78, 80, 82, 82, 84, 91, 94, 94]
+minute range 8 94 | rows after minute 72 9 | at 72 0 | at or before 72 19
+after 72 by side h_a/home_away Counter({('', 'a'): 6, ('', 'h'): 3})
+       minute              player       result   situation home_team away_team
+98532    78.0  Lorenzo Pellegrini  BlockedShot    OpenPlay   Udinese      Roma
+98533    78.0  Lorenzo Pellegrini  MissedShots    OpenPlay   Udinese      Roma
+98516    80.0       Lorenzo Lucca    SavedShot    SetPiece   Udinese      Roma
+98517    82.0     Roberto Pereyra  BlockedShot    OpenPlay   Udinese      Roma
+98518    82.0     Roberto Pereyra  BlockedShot  FromCorner   Udinese      Roma
+98534    84.0       Sardar Azmoun    SavedShot    OpenPlay   Udinese      Roma
+98535    91.0        Paulo Dybala  BlockedShot    OpenPlay   Udinese      Roma
+98536    94.0  Lorenzo Pellegrini  BlockedShot  FromCorner   Udinese      Roma
+98537    94.0     Bryan Cristante         Goal  FromCorner   Udinese      Roma
+goals in rows        minute           player
+98513    22.0  Roberto Pereyra
+98529    63.0    Romelu Lukaku
+98537    94.0  Bryan Cristante
+other rows same season same clubs, any order [('Roma', '2023-11-26 17:00:00'), ('Udinese', '2024-04-14 16:00:00')]
+rdata: rows 28 minute range 8 94 rows after 72 9
+```
+
+The 28 shot rows run from minute 8 to minute 94. **9 rows are after minute 72**, including Bryan Cristante's goal at 94, and none is at 72. All 28 rows share one `match_id` and the date 2024-04-14. So Understat holds the whole match, including the part played on 25 Apr, under the first date. Nothing needs to be dropped for it.
 
 ## Code review
 
 `/code-review` on `scripts/trim_standin.py`, high effort, once on each version of the script.
+
+Home and away columns, 1 finding: the shot files leave out `minute`, so section 11 has to read the original. Left, because no planned metric uses it.
 
 Re-trim, 7 findings:
 
@@ -594,13 +658,13 @@ for stem in plain:
     total_cells += cells; total_diffs += diffs
     print(f"{stem}: source rows {n} trimmed rows {t.num_rows} columns {t.num_columns} cells {cells} differences {diffs} {examples or ''}")
 print("\n### B. positions: Pos aside, every match equals the source file the rule picks; Pos, votes and ties recomputed by id; none lost")
-KEPT = ["Match_Date", "Matchweek", "Season_End_Year", "Team", "Player", "Player_Href", "Min"]
+KEPT = ["Match_Date", "Matchweek", "Season_End_Year", "Home_Team", "Away_Team", "Team", "Player", "Player_Href", "Min"]
 KINDS = ["passing_types", "possession", "passing", "defense", "misc"]
 mid = lambda u: re.search(r"/matches/([0-9a-f]{8})/", u).group(1)
 pid = lambda h: re.search(r"/players/([0-9a-f]{8})/", h).group(1)
 def norm(row):
     m = row["Min"]
-    return (row["Match_Date"], row["Matchweek"], int(row["Season_End_Year"]), row["Team"], row["Player"], row["Player_Href"], None if null(m) else int(float(m)))
+    return (row["Match_Date"], row["Matchweek"], int(row["Season_End_Year"]), row["Home_Team"], row["Away_Team"], row["Team"], row["Player"], row["Player_Href"], None if null(m) else int(float(m)))
 agree = {c: Counter() for c in ("Pos", "Min", "Player")}; off = {c: Counter() for c in agree}; flips = pool_flips = 0
 ATT = {"FW", "LW", "RW", "AM"}; attacking = lambda p: bool(set(p.split(",")) & ATT)
 all_kept = {}; totals = Counter(); votes_dist = Counter(); changed_rows = []; tie_rows = []
@@ -752,36 +816,39 @@ many = Counter((r["league"], r["fbref_club"]) for r in cm if r["understat_club"]
 print("mapped on under 10 linked matches:", [(r["league"], r["understat_club"], r["fbref_club"], r["linked_matches"]) for r in cm if r["understat_club"] and r["fbref_club"] and int(r["linked_matches"]) < 10 and r["exact_name"] != "True"])
 from datetime import date as Date
 files = {"ENG": "epl", "ESP": "la_liga", "FRA": "ligue_1", "GER": "bundesliga", "ITA": "serie_a"}
-none_at_all = shifted = 0; rows_none = rows_shifted = 0
-print("Pool-season Understat matches with no FBref match on the same date and pair: league, season, date, clubs, shot rows, nearest FBref date for the pair (season), days apart")
+gaps = Counter(); over = []; zero_rows = Counter(); dropped = []; dup_f = []; dup_u = []; names_differ = null_ha = totals_m = 0
 for lg, f in files.items():
     mp = {r["understat_club"]: r["fbref_club"] for r in cm if r["league"] == lg and r["understat_club"] and r["fbref_club"]}
-    fb = defaultdict(set)
-    for r in {(r["MatchURL"], r["Team"]): r for r in all_kept[lg].to_pylist()}.values(): fb[(r["MatchURL"], r["Match_Date"], r["Season_End_Year"])].add(r["Team"])
-    exact = {(d, frozenset(t)) for (u, d, y), t in fb.items()}
-    by_pair = defaultdict(list)
-    for (u, d, y), t in fb.items(): by_pair[(y, frozenset(t))].append(d)
+    by = defaultdict(list); teams = defaultdict(set); first = {}
+    for r in all_kept[lg].to_pylist():
+        teams[r["MatchURL"]].add(r["Team"]); first.setdefault(r["MatchURL"], r)
+    for u, r in first.items():
+        null_ha += r["Home_Team"] is None or r["Away_Team"] is None
+        names_differ += {r["Home_Team"], r["Away_Team"]} != teams[u]
+        if 2018 <= r["Season_End_Year"] <= 2024 and "tie-breaker" not in r["Matchweek"]:
+            by[(r["Season_End_Year"], r["Home_Team"], r["Away_Team"])].append(r["Match_Date"])
+    dup_f += [(lg, k, v) for k, v in by.items() if len(v) > 1]
     shots = Counter(); info = {}
     for r in pq.read_table(data / f"{f}_shot_data.parquet", columns=["season", "date", "match_id", "home_team", "away_team"]).to_pylist():
         if 2017 <= r["season"] <= 2023: shots[r["match_id"]] += 1; info[r["match_id"]] = r
-    total = Counter(); unl = Counter()
+    seen = Counter()
     for m, r in info.items():
-        day = r["date"][:10]; pair = frozenset((mp.get(r["home_team"]), mp.get(r["away_team"])))
-        total[int(r["season"])] += 1
-        if (day, pair) in exact: continue
-        unl[int(r["season"])] += 1
-        cands = by_pair.get((int(r["season"]) + 1, pair), [])
-        gaps = sorted((abs((Date.fromisoformat(c) - Date.fromisoformat(day)).days), c) for c in cands)
-        near = gaps[0] if gaps else None
-        # a nearest date within 3 days, or one that no other Understat date for this pair explains, is a date difference, not a missing match
-        others = [x["date"][:10] for k, x in info.items() if frozenset((mp.get(x["home_team"]), mp.get(x["away_team"]))) == pair and k != m and int(x["season"]) == int(r["season"])]
-        free = [c for g, c in gaps if c not in others]
-        kind = "DATE DIFFERS" if free else "NOT IN FBREF"
-        if free: shifted += 1; rows_shifted += shots[m]
-        else: none_at_all += 1; rows_none += shots[m]
-        print(f"  {lg} {int(r['season'])} {day} {r['home_team']} v {r['away_team']} | rows {shots[m]} | FBref dates for pair {[c for g, c in gaps]} | {kind} {free[0] if free else ''}")
-    print(f"  {lg} unlinked by season {dict(unl)} of {sum(total.values())} matches")
-print(f"not in FBref: matches {none_at_all} rows {rows_none} | date differs: matches {shifted} rows {rows_shifted}")
+        y = int(r["season"]) + 1; key = (y, mp.get(r["home_team"]), mp.get(r["away_team"])); seen[key] += 1; totals_m += 1
+        day = r["date"][:10]
+        c = sorted((abs((Date.fromisoformat(d) - Date.fromisoformat(day)).days), d) for d in by.get(key, []))
+        if not c or c[0][0] > 14:
+            dropped.append((lg, y, day, r["home_team"], r["away_team"], shots[m], c[:1])); continue
+        gaps[c[0][0]] += 1
+        if c[0][0] > 0: over.append((c[0][0], lg, day, r["home_team"], r["away_team"], c[0][1], shots[m]))
+    dup_u += [(lg, k, v) for k, v in seen.items() if v > 1]
+print("Link: same home club and same away club in the same season, nearest FBref date, at most 14 days. Tie-breaker left out.")
+print(f"home or away null {null_ha} | matches whose Home_Team and Away_Team differ from Team {names_differ}")
+print("ordered pairs twice in one season, FBref:", dup_f, "| Understat:", dup_u)
+print(f"Pool matches {totals_m} | linked {sum(gaps.values())} | no link {len(dropped)} | gap days to matches {dict(sorted(gaps.items()))}")
+print("links with a gap above 0: gap, league, Understat date, clubs, FBref date, shot rows"); [print(" ", x) for x in sorted(over, key=lambda x: (-x[0], x[1], x[2]))]
+print("no link, rows dropped: league, season end year, date, clubs, rows, nearest same-order date"); [print(" ", x) for x in dropped]
+print("rows dropped", sum(x[5] for x in dropped))
+
 print(f"\nplain-file cells compared {total_cells} differences {total_diffs}")
 print("\n### G. MANIFEST rows and columns against the files")
 m = (data / "MANIFEST.md").read_text(); mis = 0
@@ -843,6 +910,68 @@ print('schema of shots', [f'{f.name}:{f.type}' for f in pq.read_schema(data/'epl
 print('FBref files holding a player_id column:', sum('player_id' in pq.read_schema(cache/f'{lg}_M_1st_{k}_player_advanced_match_stats.parquet').names for lg in lgs for k in kinds), 'of 25')
 print('lastAction text None in trimmed shots:', sum(pq.read_table(data/f'{n}_shot_data.parquet',columns=['lastAction']).column(0).to_pylist().count('None') for n in ('bundesliga','epl','la_liga','ligue_1','serie_a')))
 print('names holding &#039; in trimmed shots:', sum(1 for n in ('bundesliga','epl','la_liga','ligue_1','serie_a') for p in pq.read_table(data/f'{n}_shot_data.parquet',columns=['player']).column(0).to_pylist() if '&#039;' in p))
+```
+
+</details>
+
+<details><summary><code>table16.py</code></summary>
+
+```python
+"""Rebuild the 16-match link table from data/standin/ only, and compare it with the table shown to Ahmed, typed in below."""
+import csv, sys
+from collections import Counter, defaultdict
+from datetime import date as Date
+from pathlib import Path
+import pyarrow.parquet as pq
+data=Path(sys.argv[1])
+SHOWN=[("FRA","2018-04-14","Caen","Toulouse","2018-04-25",11,14),("ITA","2024-04-14","Udinese","Roma","2024-04-25",11,28),("FRA","2023-04-30","Strasbourg","Lyon","2023-04-28",2,18),("ENG","2018-08-25","Fulham","Burnley","2018-08-26",1,37),("ESP","2017-09-16","Eibar","Leganes","2017-09-15",1,15),("ESP","2017-10-23","Celta Vigo","Atletico Madrid","2017-10-22",1,23),("ESP","2017-11-05","Barcelona","Sevilla","2017-11-04",1,26),("ESP","2022-05-15","Espanyol","Valencia","2022-05-14",1,23),("ESP","2023-12-12","Granada","Athletic Club","2023-12-11",1,27),("FRA","2018-05-12","Guingamp","Marseille","2018-05-11",1,38),("FRA","2022-02-02","Lyon","Marseille","2022-02-01",1,21),("FRA","2023-08-12","Nice","Lille","2023-08-11",1,20),("FRA","2023-08-12","Brest","Lens","2023-08-13",1,25),("ITA","2018-01-28","Sassuolo","Atalanta","2018-01-27",1,27),("ITA","2018-01-28","Chievo","Juventus","2018-01-27",1,17),("ITA","2024-05-24","Cagliari","Fiorentina","2024-05-23",1,25)]
+cm=list(csv.DictReader(open(data/'club_map.csv',encoding='utf8',newline='')))
+files={'ENG':'epl','ESP':'la_liga','FRA':'ligue_1','GER':'bundesliga','ITA':'serie_a'}
+built=[]; total=linked=0; no=[]
+for lg,f in files.items():
+    mp={r['understat_club']:r['fbref_club'] for r in cm if r['league']==lg and r['understat_club'] and r['fbref_club']}
+    by=defaultdict(set)
+    for r in pq.read_table(data/f'{lg}_M_1st_positions.parquet',columns=['Match_Date','Matchweek','Season_End_Year','Home_Team','Away_Team']).to_pylist():
+        if 2018<=r['Season_End_Year']<=2024 and 'tie-breaker' not in r['Matchweek']: by[(r['Season_End_Year'],r['Home_Team'],r['Away_Team'])].add(r['Match_Date'])
+    rows=Counter(); info={}
+    for r in pq.read_table(data/f'{f}_shot_data.parquet',columns=['season','date','match_id','home_team','away_team']).to_pylist():
+        if 2017<=r['season']<=2023: rows[r['match_id']]+=1; info[r['match_id']]=r
+    for m,r in info.items():
+        total+=1; day=r['date'][:10]
+        c=sorted((abs((Date.fromisoformat(d)-Date.fromisoformat(day)).days),d) for d in by.get((int(r['season'])+1,mp.get(r['home_team']),mp.get(r['away_team'])),[]))
+        if not c or c[0][0]>14: no.append((lg,day,r['home_team'],r['away_team'],rows[m])); continue
+        linked+=1
+        if c[0][0]>0: built.append((lg,day,r['home_team'],r['away_team'],c[0][1],c[0][0],rows[m]))
+built.sort(key=lambda x:(-x[5],x[0],x[1]))
+for x in built: print(' ',x)
+print('rebuilt rows',len(built),'| shown rows',len(SHOWN),'| in both',len(set(built)&set(SHOWN)),'| only rebuilt',sorted(set(built)-set(SHOWN)),'| only shown',sorted(set(SHOWN)-set(built)))
+print('matches',total,'linked',linked,'no link',no)
+print('table matches what was shown:',set(built)==set(SHOWN))
+```
+
+</details>
+
+<details><summary><code>udinese.py</code></summary>
+
+```python
+"""Udinese v Roma 2023/24: minute of each shot. minute is not in data/standin, so this reads the original with two readers."""
+import sys
+from pathlib import Path
+from collections import Counter
+import pyreadr, warnings, rdata
+warnings.simplefilter('ignore')
+p=Path(sys.argv[1])/'serie_a_shot_data.rds'
+d=pyreadr.read_r(str(p))[None]
+u=d[(d.season==2023)&(d.home_team=='Udinese')&(d.away_team=='Roma')]
+print('pyreadr: rows',len(u),'| match_id',sorted(set(u.match_id)),'| dates',sorted(set(u.date)))
+print('minutes sorted',sorted(int(x) for x in u.minute))
+print('minute range',int(u.minute.min()),int(u.minute.max()),'| rows after minute 72',int((u.minute>72).sum()),'| at 72',int((u.minute==72).sum()),'| at or before 72',int((u.minute<=72).sum()))
+print('after 72 by side h_a/home_away',Counter(zip(u[u.minute>72].h_a.fillna('').tolist(),u[u.minute>72].home_away.fillna('').tolist())))
+print(u[u.minute>=70][['minute','player','result','situation','home_team','away_team']].sort_values('minute').to_string())
+print('goals in rows',u[u.result=='Goal'][['minute','player']].to_string())
+print('other rows same season same clubs, any order',sorted(set(zip(d[(d.season==2023)&d.home_team.isin(['Udinese','Roma'])&d.away_team.isin(['Udinese','Roma'])].home_team,d[(d.season==2023)&d.home_team.isin(['Udinese','Roma'])&d.away_team.isin(['Udinese','Roma'])].date))))
+r=rdata.read_rds(p,default_encoding='utf8'); v=r[(r.season==2023)&(r.home_team=='Udinese')&(r.away_team=='Roma')]
+print('rdata: rows',len(v),'minute range',int(v.minute.min()),int(v.minute.max()),'rows after 72',int((v.minute>72).sum()))
 ```
 
 </details>
@@ -995,39 +1124,39 @@ not exact:
 exact but 0 linked: [('ITA', 'Parma')]
 FBref clubs reached by 2+ Understat names: {('ITA', 'Parma'): 2}
 mapped on under 10 linked matches: [('ESP', 'Real Oviedo', 'Oviedo', '4')]
-Pool-season Understat matches with no FBref match on the same date and pair: league, season, date, clubs, shot rows, nearest FBref date for the pair (season), days apart
-  ENG 2018 2018-08-25 Fulham v Burnley | rows 37 | FBref dates for pair ['2018-08-26', '2019-01-12'] | DATE DIFFERS 2018-08-26
-  ENG unlinked by season {2018: 1} of 2660 matches
-  ESP 2017 2017-09-16 Eibar v Leganes | rows 15 | FBref dates for pair ['2017-09-15', '2018-02-10'] | DATE DIFFERS 2017-09-15
-  ESP 2017 2017-10-23 Celta Vigo v Atletico Madrid | rows 23 | FBref dates for pair ['2017-10-22', '2018-03-11'] | DATE DIFFERS 2017-10-22
-  ESP 2017 2017-11-05 Barcelona v Sevilla | rows 26 | FBref dates for pair ['2017-11-04', '2018-03-31'] | DATE DIFFERS 2017-11-04
-  ESP 2021 2022-05-15 Espanyol v Valencia | rows 23 | FBref dates for pair ['2022-05-14', '2021-12-31'] | DATE DIFFERS 2022-05-14
-  ESP 2023 2023-12-12 Granada v Athletic Club | rows 27 | FBref dates for pair ['2023-12-11', '2024-04-19'] | DATE DIFFERS 2023-12-11
-  ESP unlinked by season {2017: 3, 2021: 1, 2023: 1} of 2660 matches
-  FRA 2017 2018-04-14 Caen v Toulouse | rows 14 | FBref dates for pair ['2018-04-25', '2017-12-09'] | DATE DIFFERS 2018-04-25
-  FRA 2017 2018-05-12 Guingamp v Marseille | rows 38 | FBref dates for pair ['2018-05-11', '2017-11-26'] | DATE DIFFERS 2018-05-11
-  FRA 2021 2022-02-02 Lyon v Marseille | rows 21 | FBref dates for pair ['2022-02-01', '2022-05-01'] | DATE DIFFERS 2022-02-01
-  FRA 2022 2023-04-30 Strasbourg v Lyon | rows 18 | FBref dates for pair ['2023-04-28', '2023-01-14'] | DATE DIFFERS 2023-04-28
-  FRA 2023 2023-08-12 Nice v Lille | rows 20 | FBref dates for pair ['2023-08-11', '2024-05-19'] | DATE DIFFERS 2023-08-11
-  FRA 2023 2023-08-12 Brest v Lens | rows 25 | FBref dates for pair ['2023-08-13', '2024-03-09'] | DATE DIFFERS 2023-08-13
-  FRA unlinked by season {2017: 2, 2021: 1, 2022: 1, 2023: 2} of 2485 matches
-  GER 2021 2022-03-18 Bochum v Borussia M.Gladbach | rows 24 | FBref dates for pair ['2021-10-31'] | NOT IN FBREF 
-  GER unlinked by season {2021: 1} of 2142 matches
-  ITA 2017 2018-01-28 Sassuolo v Atalanta | rows 27 | FBref dates for pair ['2018-01-27', '2017-09-10'] | DATE DIFFERS 2018-01-27
-  ITA 2017 2018-01-28 Chievo v Juventus | rows 17 | FBref dates for pair ['2018-01-27', '2017-09-09'] | DATE DIFFERS 2018-01-27
-  ITA 2020 2020-09-19 Verona v Roma | rows 29 | FBref dates for pair ['2021-01-31'] | NOT IN FBREF 
-  ITA 2023 2024-04-14 Udinese v Roma | rows 28 | FBref dates for pair ['2024-04-25', '2023-11-26'] | DATE DIFFERS 2024-04-25
-  ITA 2023 2024-05-24 Cagliari v Fiorentina | rows 25 | FBref dates for pair ['2024-05-23', '2023-10-02'] | DATE DIFFERS 2024-05-23
-  ITA 2023 2024-06-02 Atalanta v Fiorentina | rows 20 | FBref dates for pair ['2023-09-17'] | NOT IN FBREF 
-  ITA unlinked by season {2017: 2, 2020: 1, 2023: 3} of 2660 matches
-not in FBref: matches 3 rows 73 | date differs: matches 16 rows 384
+Link: same home club and same away club in the same season, nearest FBref date, at most 14 days. Tie-breaker left out.
+home or away null 0 | matches whose Home_Team and Away_Team differ from Team 0
+ordered pairs twice in one season, FBref: [] | Understat: []
+Pool matches 12607 | linked 12604 | no link 3 | gap days to matches {0: 12588, 1: 13, 2: 1, 11: 2}
+links with a gap above 0: gap, league, Understat date, clubs, FBref date, shot rows
+  (11, 'FRA', '2018-04-14', 'Caen', 'Toulouse', '2018-04-25', 14)
+  (11, 'ITA', '2024-04-14', 'Udinese', 'Roma', '2024-04-25', 28)
+  (2, 'FRA', '2023-04-30', 'Strasbourg', 'Lyon', '2023-04-28', 18)
+  (1, 'ENG', '2018-08-25', 'Fulham', 'Burnley', '2018-08-26', 37)
+  (1, 'ESP', '2017-09-16', 'Eibar', 'Leganes', '2017-09-15', 15)
+  (1, 'ESP', '2017-10-23', 'Celta Vigo', 'Atletico Madrid', '2017-10-22', 23)
+  (1, 'ESP', '2017-11-05', 'Barcelona', 'Sevilla', '2017-11-04', 26)
+  (1, 'ESP', '2022-05-15', 'Espanyol', 'Valencia', '2022-05-14', 23)
+  (1, 'ESP', '2023-12-12', 'Granada', 'Athletic Club', '2023-12-11', 27)
+  (1, 'FRA', '2018-05-12', 'Guingamp', 'Marseille', '2018-05-11', 38)
+  (1, 'FRA', '2022-02-02', 'Lyon', 'Marseille', '2022-02-01', 21)
+  (1, 'FRA', '2023-08-12', 'Nice', 'Lille', '2023-08-11', 20)
+  (1, 'FRA', '2023-08-12', 'Brest', 'Lens', '2023-08-13', 25)
+  (1, 'ITA', '2018-01-28', 'Sassuolo', 'Atalanta', '2018-01-27', 27)
+  (1, 'ITA', '2018-01-28', 'Chievo', 'Juventus', '2018-01-27', 17)
+  (1, 'ITA', '2024-05-24', 'Cagliari', 'Fiorentina', '2024-05-23', 25)
+no link, rows dropped: league, season end year, date, clubs, rows, nearest same-order date
+  ('GER', 2022, '2022-03-18', 'Bochum', 'Borussia M.Gladbach', 24, [])
+  ('ITA', 2021, '2020-09-19', 'Verona', 'Roma', 29, [])
+  ('ITA', 2024, '2024-06-02', 'Atalanta', 'Fiorentina', 20, [])
+rows dropped 73
 
 plain-file cells compared 9792594 differences 0
 
 ### G. MANIFEST rows and columns against the files
 trimmed files 17 mismatches 0 | source rows in manifest 38
 schemas differ within group: {'*_shot_data.parquet': 1, '*_positions.parquet': 1, '*_match_summary.parquet': 2}
-positions columns ['MatchURL', 'Match_Date', 'Matchweek', 'Season_End_Year', 'Team', 'Player', 'Player_Href', 'Pos', 'Min', 'Pos_Files_Voted', 'Pos_Tie'] | shot columns ['id', 'league', 'season', 'match_id', 'date', 'player', 'player_id', 'home_team', 'away_team', 'X', 'Y', 'xG', 'situation', 'shotType', 'lastAction', 'result']
+positions columns ['MatchURL', 'Match_Date', 'Matchweek', 'Season_End_Year', 'Home_Team', 'Away_Team', 'Team', 'Player', 'Player_Href', 'Pos', 'Min', 'Pos_Files_Voted', 'Pos_Tie'] | shot columns ['id', 'league', 'season', 'match_id', 'date', 'player', 'player_id', 'home_team', 'away_team', 'X', 'Y', 'xG', 'situation', 'shotType', 'lastAction', 'result']
 ```
 
 </details>
