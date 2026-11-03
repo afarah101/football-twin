@@ -110,8 +110,10 @@ These also override earlier decisions where they differ.
 - STEP 0 answers the data questions from the stand-in files (worldfootballR Understat shot files, FBref positions and minutes, HF season totals). Live Understat checks wait until the "Understat is back" issue opens.
 - Stand-in loader: reads the local worldfootballR, FBref and HF files behind the same adapter interface the live Understat adapter will use later.
 - Backfill on the stand-in source: trim the vetted stand-in files to the columns the build needs and store them privately as Parquet. Record the hash of each original file and commit the trim script, so the trim can be repeated. No network scraping.
+- FBref data is used only for private building and testing. The public site (#13) launches only after positions and minutes come from live Understat (#14), so no FBref data is public.
 - Original stand-in files: private release https://github.com/afarah101/football-twin/releases/tag/stand-in-originals, with their hashes in its release notes.
 - Reading `.rds` with rdata: always pass `default_encoding="utf8"`, drop rdata's 1-based index, and convert nulls to one standard (`pd.NA`) before writing Parquet.
+- Box boundaries (Q16, calibrated in `docs/reports/T3_step0_facts.md`, replacing the starting estimates): `BOX_X_MIN` 0.8275, `BOX_Y_MIN` 0.2075, `BOX_Y_MAX` 0.7925, `SIX_X_MIN` 0.9425, `SIX_Y_MIN` 0.365, `SIX_Y_MAX` 0.635. A shot is inside a box when X is at or above the X line and Y is between the two Y lines, both inclusive.
 - Launch on the stand-in source: a static site with no Monday job, because the data does not update. The site shows "Data to 2023/24". The Monday job and current-season search wait for live Understat. It cannot launch publicly until the FBref (Sports Reference) and HF dataset terms and the worldfootballR repo's licence status are recorded and Ahmed approves.
 - Ties: equal attacking and other minutes stays out of the Pool. Display-label tie: pick alphabetically.
 
