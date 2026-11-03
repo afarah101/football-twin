@@ -109,8 +109,8 @@ These also override earlier decisions where they differ.
 - Display labels: show FBref's own labels (FW, LW, RW, AM). Drop the 6 Understat codes while on the stand-in source.
 - STEP 0 answers the data questions from the stand-in files (worldfootballR Understat shot files, FBref positions and minutes, HF season totals). Live Understat checks wait until the "Understat is back" issue opens.
 - Stand-in loader: reads the local worldfootballR, FBref and HF files behind the same adapter interface the live Understat adapter will use later.
-- Backfill on the stand-in source: copy the vetted stand-in files into private gzipped storage, with file hashes recorded. No network scraping.
-- Launch on the stand-in source: a static site with no Monday job, because the data does not update. The site shows "Data to 2023/24". The Monday job and current-season search wait for live Understat.
+- Backfill on the stand-in source: trim the vetted stand-in files to the columns the build needs and store them privately as Parquet. Record the hash of each original file and commit the trim script, so the trim can be repeated. No network scraping.
+- Launch on the stand-in source: a static site with no Monday job, because the data does not update. The site shows "Data to 2023/24". The Monday job and current-season search wait for live Understat. It cannot launch publicly until the FBref (Sports Reference) and HF dataset terms and the worldfootballR repo's licence status are recorded and Ahmed approves.
 - Ties: equal attacking and other minutes stays out of the Pool. Display-label tie: pick alphabetically.
 
 ### Site and code
