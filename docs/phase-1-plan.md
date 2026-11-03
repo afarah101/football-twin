@@ -38,7 +38,7 @@ Type a player and season. Get his 5 closest statistical twins, a 2D map and a fi
 ## Validation (not self-graded)
 1. Self-match: own next season in top 10 (exclusion lifted for this test). Compare with a random baseline.
 2. Stability: rank correlation when each metric is dropped.
-3. Blind spot-check, part of the outside review: a non-Claude model gets the metric tables and top-5 twins for 10 randomly chosen players (fixed seed) and rates each list as plausible or not. Report the count.
+3. Blind spot-check, part of the outside review: a non-Claude model gets the metric tables and top-5 twins for 10 randomly chosen players (fixed seed) and rates each list as plausible or not, judging playing style only, not quality, fame or club. Report the count. Launch needs at least 7 of 10 rated plausible.
 4. Outside model reviews code and results.
 5. The winning distance method = highest self-match rate. Launch also needs the outside review.
 
@@ -81,7 +81,7 @@ These override the plan above where they differ.
 - Q11: Ahmed writes the pairs. No pairs are suggested by anyone else. Format: 12 twin pairs and 5 not-twin pairs, seasons 2014/15 onwards, forwards or attacking midfielders with 900+ minutes.
 - Q11: No distance code runs until Ahmed commits `config/face_validity_pairs.yaml`.
 - Q11: A method passes face validity if at least 70% of twin pairs fall in the closest 5% of all pairs and no not-twin pair does.
-- Q12: If no method reaches PASS on the self-match test, or the outside review rejects the results, the site does not launch. We revisit the metrics and do not lower the bar.
+- Q12: If no method reaches PASS on the self-match test, fewer than 7 of 10 twin lists are rated plausible in the blind spot-check (playing style only, not quality, fame or club), or the outside review rejects the results, the site does not launch. We revisit the metrics and do not lower the bar.
 - Q19: The PASS, WEAK and FAIL bands apply to the later-season rate, judged on the point estimate. A confidence interval is shown beside it.
 - Q20: The Basketball method uses the same 10 shrunk metrics and replaces only the z-score and clip step with percentiles. It appears in the validation report, not on the public site.
 - Q21: The stability test is report-only, with no pass or fail. Any metric whose removal changes the rankings most is flagged for the outside review.
@@ -103,12 +103,11 @@ These also override earlier decisions where they differ.
 - Q10 split: choose the method on 2017/18-2021/22. Report PASS, WEAK or FAIL on the 2022/23 and 2023/24 transitions.
 - Position source: FBref per-match Pos. Compare with Understat positions when the "Understat is back" issue opens.
 - Multi-position rows: count as attacking if any label is FW, LW, RW or AM.
-- LM/RM: decided by Ahmed from the names list, which is no longer blocked.
+- LM/RM: stay "other", so they do not count as attacking labels. Ahmed decided from the names list.
 - Position rule: a match row is "attacking" if any Pos label is FW, LW, RW or AM, else "other". Sub appearances ignored (Q5). A PlayerSeason joins the Pool if attacking minutes > other minutes.
 - The 6 codes are display-only: show the most frequent first-listed attacking label. Position is never used in distance.
 - Display labels: show FBref's own labels (FW, LW, RW, AM). Drop the 6 Understat codes while on the stand-in source.
 - Ties: equal attacking and other minutes stays out of the Pool. Display-label tie: pick alphabetically.
-- LM/RM: stay "other" until Ahmed decides from the names list. If added, update the position rule's label list.
 
 ### Site and code
 - Q23: The build precomputes everything, including both twin lists (all leagues and same league) and closeness percentiles. The site is plain static HTML and JS with inline SVG, no framework, and no distance maths in the browser. Two files join the per-league-season JSON: a name index and the map points.

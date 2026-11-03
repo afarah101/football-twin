@@ -71,7 +71,3 @@ _Avoid_: Basketball method, control
 **Self-match**:
 The test of whether a PlayerSeason's own next season appears in its top 10.
 _Avoid_: Backtest, stability
-
-**Face validity pair**:
-A pair of PlayerSeasons Ahmed names in advance as twins or not-twins. Only Ahmed writes these.
-_Avoid_: Test case, example, ground truth
