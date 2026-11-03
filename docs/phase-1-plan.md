@@ -118,6 +118,11 @@ These also override earlier decisions where they differ.
 - Box boundaries (Q16, calibrated in `docs/reports/T3_step0_facts.md`, replacing the starting estimates): `BOX_X_MIN` 0.8275, `BOX_Y_MIN` 0.2075, `BOX_Y_MAX` 0.7925, `SIX_X_MIN` 0.9425, `SIX_Y_MIN` 0.365, `SIX_Y_MAX` 0.635. A shot is inside a box when X is at or above the X line and Y is between the two Y lines, both inclusive.
 - Site on the stand-in source: a private static site, run locally only and not deployed publicly. It has no Monday job, because the data does not update, and it shows "Data to 2023/24". The public launch uses live Understat data (#15), along with the Monday job and current-season search. The public site uses only live Understat data, so the public-launch terms check is Understat's terms (Q18, read in #14). The FBref (Sports Reference) and HF dataset terms and the worldfootballR repo's licence status apply only to the private stand-in.
 - Ties: equal attacking and other minutes stays out of the Pool. Display-label tie: pick alphabetically.
+- Rule for #6, tie-breaker matches: excluded from minutes and shots (filter on `Matchweek`).
+- Rule for #6, matches with shots but no FBref minutes (e.g. ITA 2023/24 Atalanta v Fiorentina): drop those shot rows, so shots and minutes always cover the same matches. Report how many rows per league-season.
+- Rule for #6, one player under two FBref ids: merge ids only when name, team and season match and their matches never overlap. List every merge in the #6 report.
+- Rule for #6, Pos disagreements between files: use the majority Pos across the files that hold the match. On a tie, keep the chosen file's value.
+- Rule for #6: re-cut `tests/fixtures/standin/` from `data/standin/`, so the fixtures match the trimmed schema.
 
 ### Site and code
 - Q23: The build precomputes everything, including both twin lists (all leagues and same league) and closeness percentiles. The site is plain static HTML and JS with inline SVG, no framework, and no distance maths in the browser. Two files join the per-league-season JSON: a name index and the map points.
