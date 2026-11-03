@@ -99,7 +99,7 @@ These override the plan above where they differ.
 
 ### Stand-in source (while understat.com is down)
 These also override earlier decisions where they differ.
-- Pool seasons are 2017/18-2023/24, from worldfootballR shot files + FBref positions and minutes. Extend to 2014/15 from live Understat when it returns.
+- Pool seasons are 2017/18-2023/24, from worldfootballR shot files + FBref positions and minutes + HF season totals. Extend to 2014/15 from live Understat when it returns.
 - Q10 split: choose the method on 2017/18-2021/22. Report PASS, WEAK or FAIL on the 2022/23 and 2023/24 transitions.
 - Position source: FBref per-match Pos. Compare with Understat positions when the "Understat is back" issue opens.
 - Multi-position rows: count as attacking if any label is FW, LW, RW or AM.
@@ -108,6 +108,9 @@ These also override earlier decisions where they differ.
 - The 6 codes are display-only: show the most frequent first-listed attacking label. Position is never used in distance.
 - Display labels: show FBref's own labels (FW, LW, RW, AM). Drop the 6 Understat codes while on the stand-in source.
 - STEP 0 answers the data questions from the stand-in files (worldfootballR Understat shot files, FBref positions and minutes, HF season totals). Live Understat checks wait until the "Understat is back" issue opens.
+- Stand-in loader: reads the local worldfootballR, FBref and HF files behind the same adapter interface the live Understat adapter will use later.
+- Backfill on the stand-in source: copy the vetted stand-in files into private gzipped storage, with file hashes recorded. No network scraping.
+- Launch on the stand-in source: a static site with no Monday job, because the data does not update. The site shows "Data to 2023/24". The Monday job and current-season search wait for live Understat.
 - Ties: equal attacking and other minutes stays out of the Pool. Display-label tie: pick alphabetically.
 
 ### Site and code
