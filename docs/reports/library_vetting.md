@@ -7,37 +7,50 @@ Run date: 2026-11-03. Repo position at the start: `70d590f`, level with origin.
 | Library | Version | Licence | Verdict | Allowed list |
 |---|---|---|---|---|
 | pyarrow | 26.0.1 | Apache-2.0 | **SAFE** | **Added** |
-| rdata | 1.1.0 | MIT | **PENDING.** No security blocker, but no file meets the strict comparison rule. | **Not added**, waits for Ahmed |
-| pyreadr | 0.5.9 | AGPL-3.0-or-later | **No security blocker, not allowed.** AGPL needs Ahmed's approval. | **Not added** |
+| rdata | 1.1.0 | MIT | **Accepted by Ahmed.** No security blocker. Its dtypes differ from pyreadr's, and the data agrees. | **Added**, with the rules below |
+| pyreadr | 0.5.9 | AGPL-3.0-or-later | **No security blocker, not allowed (AGPL).** | **Not added** |
 
-**rdata did not MATCH under the decision rule.** All 35 files are `DIFF`, because every file has dtype differences. The data agrees on every comparison: rows, column names, nulls and values are the same in all 35 files. Under the rule, pyarrow is added, rdata stays PENDING, and the work stops for Ahmed.
-
-**Issue #3 is still blocked.** No allowed library can read `.rds` files until Ahmed decides.
+**rdata did not MATCH under the original decision rule.** All 35 files are `DIFF`, because every file has dtype differences. The data agrees on every comparison: rows, column names, nulls and values are the same in all 35 files. Ahmed reviewed this and accepted rdata.
 
 **Release assets:** all 38 hashes match.
 
-## Decision for Ahmed
+## Decision
 
-The rule treats any dtype difference as a difference, so it cannot pass rdata as it stands. The options are:
+Ahmed accepted rdata on 2026-11-03, with three rules recorded in the plan:
 
-| Option | What changes | Cost |
-|---|---|---|
-| **A. Accept rdata (recommended)** | Add rdata to the allowed list. Accept that its dtypes differ, and fix one target schema in the trim. | Reads about 5 times slower here, and needs `default_encoding="utf8"`. The Parquet round-trip must be repeated on rdata's output. |
-| B. Approve pyreadr | Add pyreadr to the allowed list. | AGPL enters the stack, which is your call. |
-| C. Keep both out | Find another reader. | More vetting, and #3 stays blocked. |
+1. Always pass `default_encoding="utf8"`.
+2. Drop rdata's 1-based index.
+3. Convert nulls to one standard (`pd.NA`) before writing Parquet.
 
-Why A: every value agrees, and pyreadr is the one with the awkward types here. It returns 68 columns as `object`, holding Python ints mixed with float `NaN`, where rdata returns `Int32`.
+rdata reads about 5 times slower than pyreadr here. pyreadr returns 68 columns as `object`, holding Python ints mixed with float `NaN`, where rdata returns `Int32`.
+
+## Parquet round-trip on rdata's output
+
+All 35 `.rds` files, with all three rules applied and all columns kept. Network and home writes were blocked. Each file was written to Parquet, read back, and compared with the frame before writing, using `compare_frames` from `compare.py`.
+
+| Check | Differences |
+|---|---:|
+| Rows | 0 |
+| Column names | 0 |
+| Dtypes after read-back | 0 |
+| Nulls | 0 |
+| Values | 0 |
+| `NaN` left in Parquet float columns | 0 |
+| Cells differing from the pyreadr-based Parquet (the columns the build keeps, cast to its schema) | 0 |
+
+Rows checked: 2,673,934. Network and subprocess audit events: none.
+
+An earlier run without the `pd.NA` step, using the build's trimmed columns, also showed 0 round-trip differences, 0 column type differences against the pyreadr-based Parquet, and 0 files unequal to it.
+
+The rules only cover files read through rdata. The 3 `.csv` originals are outside this check; they were covered by the pandas round-trip in `probe.log`.
 
 ## Findings
 
 | Severity | Finding | Evidence |
 |---|---|---|
-| Critical | No allowed library can read the 35 `.rds` originals, so #3 and the trim cannot start. | Decision rule, comparison table |
-| Warning | The Parquet round-trip was proven on pyreadr's output only. rdata returns different dtypes (`string`, `Int32`, `boolean`), and these have not been written to Parquet. | `probe.py` reads `.rds` with `pyreadr.read_r` |
 | Warning | rdata crashes on real data without `default_encoding="utf8"`: `UnicodeDecodeError` on a GER file. | `out/peek_ger.txt` |
 | Warning | rdata's index starts at 1 and pyreadr's at 0. Index matched in 0 of 35 files. Any code using the index would be off by one, so the trim must drop it. | Tally; the offset of exactly 1 was checked on the 7 files below |
 | Warning | The first `gitleaks` wheel scan was invalid: it scanned about 0 bytes and reported no leaks. Results below come from a rescan of unpacked wheels. | `sweep/gitleaks.txt` vs rescan |
-| Warning | Issue #1 also holds an allowed libraries list. It was out of scope, so it now differs from the plan. | Scope of this task |
 | Info | The pyarrow wheel was uploaded on the day of this vetting, so a clean CVE check says little yet. | PyPI: 2026-11-03T10:52:41 |
 | Info | Everything ran on Python 3.15 on macOS arm64. Nothing was tested on the Python or OS the build will use. | Wheel names |
 | Info | The 3 `.csv` originals are not part of the comparison, because neither library reads them. | `release_files.txt`: 38 files, 35 `.rds` |
@@ -178,7 +191,7 @@ Gitleaks hits:
 
 `osv-scanner` on the `arrow/python` folder also lists 4 setuptools advisories against version 9.1.0, from `requirements-build.txt`. That is a build-time file. setuptools is not installed in the test environment.
 
-## rdata 1.1.0: PENDING
+## rdata 1.1.0: accepted by Ahmed
 
 | Check | Result |
 |---|---|

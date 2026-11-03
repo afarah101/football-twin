@@ -48,7 +48,7 @@ Type a player and season. Get his 5 closest statistical twins, a 2D map and a fi
 
 ## Code
 - pipeline (ingest, profiles, twins, build) and web. DDD terms: PlayerSeason, MetricProfile, PeerGroup, TwinMatch.
-- Allowed libraries: understatapi, pandas, numpy, scipy, scikit-learn, pyyaml, pytest, pyarrow. PENDING, not allowed until Ahmed decides: rdata (see `docs/reports/library_vetting.md`).
+- Allowed libraries: understatapi, pandas, numpy, scipy, scikit-learn, pyyaml, pytest, pyarrow, rdata. pyreadr is not allowed (AGPL). See `docs/reports/library_vetting.md`.
 
 ## Open checks (STEP 0)
 Reuse search, understatapi security sweep, rate test, exact lastAction and position strings, season coverage, field check.
@@ -111,6 +111,7 @@ These also override earlier decisions where they differ.
 - Stand-in loader: reads the local worldfootballR, FBref and HF files behind the same adapter interface the live Understat adapter will use later.
 - Backfill on the stand-in source: trim the vetted stand-in files to the columns the build needs and store them privately as Parquet. Record the hash of each original file and commit the trim script, so the trim can be repeated. No network scraping.
 - Original stand-in files: private release https://github.com/afarah101/football-twin/releases/tag/stand-in-originals, with their hashes in its release notes.
+- Reading `.rds` with rdata: always pass `default_encoding="utf8"`, drop rdata's 1-based index, and convert nulls to one standard (`pd.NA`) before writing Parquet.
 - Launch on the stand-in source: a static site with no Monday job, because the data does not update. The site shows "Data to 2023/24". The Monday job and current-season search wait for live Understat. It cannot launch publicly until the FBref (Sports Reference) and HF dataset terms and the worldfootballR repo's licence status are recorded and Ahmed approves.
 - Ties: equal attacking and other minutes stays out of the Pool. Display-label tie: pick alphabetically.
 
