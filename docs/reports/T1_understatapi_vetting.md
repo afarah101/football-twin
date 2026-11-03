@@ -9,11 +9,11 @@ Issue: afarah101/football-twin#2. Parent spec: #1. Run date: 2026-11-03. Library
 | Is the library's own code malicious or risky? | No evidence of that. All 16 package files read. No exec, eval, subprocess, pickle, base64 or file writes. Network calls go only to `https://understat.com/`. |
 | Is the default install safe? | **No.** `pip install understatapi` forces hard pins that carry 14 known advisories, CVSS up to 9.1. |
 | Is there a clean way to install it? | Yes, offline evidence only. `--no-deps` plus current dependency versions gives 0 advisories and all 31 library tests pass. |
-| Does it still work against Understat today? | **Not known.** The live call was not run because network access to understat.com was not approved. |
+| Does it still work against Understat today? | **Not known.** Ahmed approved one live call. It ran and failed at the network: a Virgin Media router refuses any route to Understat's hosting range, so no HTTP request reached the site. This says nothing about the library. |
 
 **Safe to wire in at ticket 5 (issue #6, Understat adapter): NO, not yet.** It becomes YES when all of these are true:
 
-1. Ahmed approves one live call to understat.com and that call works (vetting step 5).
+1. One live call reaches understat.com from a network that can route to it, and works (vetting step 5).
 2. The install is hash-pinned with `--no-deps` and uses patched dependency pins, not the library's pins.
 3. Issue #6 handles the two adapter findings below: masked HTTP errors and no timeout.
 
@@ -28,7 +28,8 @@ Plan header:
 | Severity | Finding | Evidence | Action for issue #6 |
 |---|---|---|---|
 | **Critical** | Hard pins in `install_requires` bring 14 advisories: urllib3 1.26.5 (10), idna 2.10 (2), certifi 2025.11.12 (1, CVSS 9.1), requests 2.32.5 (1). Exploitability for our use was not assessed. | Step 3, Step 6d | Never use the default install. Use `--no-deps` with own pins. |
-| Warning | Live behaviour is unverified. Every library test is mocked, and the last release is 8 months old. | Step 4 | Run one live call first. |
+| **Critical** | Understat is unreachable from this machine's network. This is a project problem, not a library problem. It also blocks #3 (real fixtures) and the plan's laptop backfill (#7), not only this check. GitHub Actions reach is untested, which matters for the Monday job (#13). | Step 4 | Ahmed chooses a network that can reach it. |
+| Warning | Live behaviour is unverified. Every library test is mocked, the one live call never reached the site, and the last release is 8 months old. | Step 4 | Repeat the live call first. |
 | Warning | Player, match and team endpoints turn **every** HTTP error into `InvalidPlayer`, `InvalidMatch` or `InvalidTeam`. A 429 or 503 looks like a bad ID. League endpoints raise a plain `HTTPError`. This matters for Q25 (fail on 404) and for retries. | Step 4, error probe. Team reads the same in code, but was not probed. | Read the status from `err.__cause__.response.status_code`. |
 | Warning | No timeout on any request. A hung connection blocks the backfill forever. | Step 4, `timeout passed by library: False` | Pass `timeout=` on each call. Kwargs reach `session.get`. |
 | Warning | Depends on Understat's undocumented AJAX routes, with one active maintainer. A site change broke all endpoints in Dec 2025. The dependency-update PR #14 has been open 11 months. | Step 5 | Keep the Q25 failure checks. Expect breakage. |
@@ -48,7 +49,7 @@ Quoted word for word from issue #2.
 | 2 | "Engagement-farming check is reported: stars vs commits, last commit, issues answered, tests, licence, and whether the code does what the README claims" | **Met**. The README claim is confirmed offline only. | Step 5, Step 4 |
 | 3 | "Cloned only into `~/sandbox/`, pinned to a commit hash, installed with `pip install --no-deps` into a venv" | **Met** | Step 6b |
 | 4 | "osv-scanner, semgrep --config auto and gitleaks have run, with every finding reported" | **Met** | Step 6d |
-| 5 | "A minimal example matching our use case runs in the sandbox, or the blocker is reported" | **Met by reporting the blocker**: network not approved. An offline example did run. | Step 4 |
+| 5 | "A minimal example matching our use case runs in the sandbox, or the blocker is reported" | **Met by reporting the blocker**: the approved live call could not reach Understat from this network. An offline example did run. | Step 4 |
 | 6 | "Work stops and Ahmed is asked before anything is wired into the project" | **Met**. Nothing is wired in. Decision for Ahmed is at the end of this report. | Decision for Ahmed |
 
 ## Step 0: read first
@@ -330,9 +331,91 @@ Unusual packages: none spotted, judged by name only. `numpy`, `pandas` and the l
 
 ## Step 4: value check
 
-**Live call to understat.com: NOT RUN - network not approved.**
+**Live call to understat.com: RUN once, approved by Ahmed. FAILED at the network. No HTTP response.**
 
-No request was sent to understat.com during this vetting. What follows is offline evidence and does not prove the library works against the site today.
+This is real output, using `venv2` (patched dependencies) and the library's public `get_shot_data`, with one request, no redirects and a 30 s timeout. Player id 2371 comes from the library's docstring. Script: `~/sandbox/understatapi/probes/live_probe.py`. Nothing was saved.
+
+```
+$ venv2/bin/python -I probes/live_probe.py
+understatapi 0.7.1 requests 2.34.2 urllib3 2.8.0
+outcome: ConnectionError (status via chain: None)
+http requests sent: 0
+hosts resolved: ['understat.com']
+get_shot_data returned rows: False
+```
+
+`http requests sent: 0` counts responses received, through a response hook. The failure came at connect, before any HTTP was sent.
+
+Diagnosis used DNS, traceroute and bare TCP connects only, with no further HTTP request. No connection to Understat succeeded.
+
+```
+$ socket connect, understat.com:443
+dns 45.90.32.72
+FAILED OSError [Errno 51] Network is unreachable
+
+$ socket connect + TLS, pypi.org:443 (control)
+dns 151.101.64.223
+tcp ok ('151.101.192.223', 443)
+tls ok TLSv1.3 GlobalSign nv-sa
+
+$ dig +short understat.com / dig +short understat.com @1.1.1.1
+45.90.32.72
+45.90.32.72
+
+$ route -n get 45.90.32.72
+   route to: 45.90.32.72
+    gateway: 192.168.0.1
+  interface: en0
+
+$ TCP connects to other hosts
+example.com 443 tcp ok 172.66.147.243
+wikipedia.org 443 tcp ok 185.15.59.224
+45.90.32.72 443 FAILED OSError [Errno 51] Network is unreachable
+45.90.32.72 80 FAILED OSError [Errno 51] Network is unreachable
+understat.com 80 FAILED OSError [Errno 51] Network is unreachable
+45.90.32.1 FAILED OSError [Errno 51] Network is unreachable
+beget.com 178.248.236.146 tcp ok
+
+$ traceroute -n -m 14 -q 1 -w 2 45.90.32.72
+traceroute to 45.90.32.72 (45.90.32.72), 14 hops max, 40 byte packets
+ 1  192.168.0.1  6.298 ms
+ 2  10.53.32.89  12.260 ms
+ 3  80.255.193.64  13.905 ms !N
+
+$ whois 80.255.193.64
+inetnum:        80.255.192.0 - 80.255.223.255
+netname:        UK-NTLI-20011228
+country:        GB
+descr:          Virgin Media
+
+$ whois -h whois.ripe.net 45.90.32.72
+inetnum:        45.90.32.0 - 45.90.32.255
+netname:        BEGET-NET-84
+country:        RU
+origin:         AS198610
+descr:          BEGET.RU
+
+$ tailscale status
+backend NeedsLogin, exit node in use: False
+```
+
+What this shows:
+
+- Hop 3, a Virgin Media router, answers `!N` (network unreachable) for Understat's IP. A second address in the same /24 fails the same way. So the refusal covers at least part of that hosting range and is not specific to Understat.
+- This machine's routing, DNS and internet access are fine. Beget's own website, on a different range, connects.
+- It fits the spec's note that "Understat could not be reached from the planning session".
+
+What this does not show:
+
+- Why Virgin Media refuses the route. It could be deliberate or a routing fault.
+- Whether Understat is up or reachable from other networks.
+- Web searches found no report of this block. The only related lead is that [soccerdata's Understat docs](https://soccerdata.readthedocs.io/en/stable/datasources/Understat.html) mention a proxy option.
+
+No VPN, proxy or other route was tried. Whether to route around a possibly deliberate ISP block is Ahmed's decision.
+
+The one live fact gained: a connection failure comes through as a plain `requests` `ConnectionError`, not as `InvalidPlayer`.
+
+Everything below is offline evidence and does not prove the library works against the site today.
 
 Offline example matching our use case, with `requests.Session.get` stubbed to return the library's own recorded fixtures. Field names only. Script: `~/sandbox/understatapi/probes/offline_probe.py`.
 
@@ -429,7 +512,7 @@ $ gh api search/code: "understatapi filename:requirements.txt" / "\"from underst
 | Abandonment | A contributor called it "dead" on 2025-12-14. The owner replied 3 days later that it is not dead but is checked rarely. |
 | Tests | 31, all mocked, none touch the live site. |
 | CI | `ci/circleci: test` and `ci/circleci: deploy` both success at the pinned commit |
-| Does what README says | Offline: the endpoints, URLs and returned JSON shapes match. Live: NOT RUN. |
+| Does what README says | Offline: the endpoints, URLs and returned JSON shapes match. Live: unverified, the call could not reach the site. |
 
 A maintained fork, `jeke-understat-scrapper`, exists. It was not vetted because Q13 rules out other libraries unless this one fails.
 
@@ -724,7 +807,7 @@ $ gitleaks dir sdist/understatapi-0.7.1
 12:01AM INF no leaks found
 ```
 
-Scanner network use: `api.osv.dev` received package names and versions, and `semgrep.dev` served rules (`--config auto` also sends semgrep usage metrics). The other hosts contacted were `pypi.org`, `files.pythonhosted.org`, `github.com`, `api.github.com` and `pypistats.org`. None of this included project data.
+Scanner network use: `api.osv.dev` received package names and versions, and `semgrep.dev` served rules (`--config auto` also sends semgrep usage metrics). The other hosts contacted during vetting were `pypi.org`, `files.pythonhosted.org`, `github.com`, `api.github.com` and `pypistats.org`, plus the network diagnosis hosts in Step 4. None of this included project data.
 
 ## Step 7: verdict reasons
 
@@ -739,7 +822,7 @@ For SAFE:
 Against:
 
 - The default install brings 14 advisories. This has a tested offline workaround.
-- Vetting step 5 is not complete on live data, and the library has broken before when Understat changed.
+- Vetting step 5 is not complete on live data, because Understat is unreachable from this network. The library has also broken before when Understat changed.
 
 Not UNSAFE: nothing suggests malicious behaviour, and the dependency issue is avoidable.
 
@@ -749,6 +832,7 @@ Not UNSAFE: nothing suggests malicious behaviour, and the dependency issue is av
 - Patterns were swept on the current tree and sdist, not on git history. gitleaks covered history for secrets only.
 - The advisories were listed, not assessed for reachability in our use.
 - The audit hook ran with `Session.get` stubbed, so the real HTTP path was covered by reading code only.
+- Understat's reachability was tested from this one network only.
 - Star patterns were not checked. The stargazers API returned 404, so star dates and accounts are unknown. The stars-vs-use judgement rests on downloads and code search.
 - The Understat terms and the rate test are out of scope here and belong to #3.
 
@@ -760,6 +844,11 @@ Not UNSAFE: nothing suggests malicious behaviour, and the dependency issue is av
 
 ## Decision for Ahmed
 
-Approve one live call to understat.com in the sandbox? It would complete vetting step 5, print field names only and show no per-player values. Issue #2's own criteria are met either way, but ticket 5 stays NO until this passes.
+Which network should repeat the live call? It would complete vetting step 5, print field names only and show no per-player values.
+
+- **Phone hotspot or another network:** the cheapest test, with no repo changes. It uses a different ISP, so this is Ahmed's choice to make.
+- **One-off GitHub Actions run:** also answers whether the Monday job (#13) can reach Understat, but needs a workflow file and a push, which are outside this ticket's scope.
+
+Issue #2's own criteria are met either way, but ticket 5 stays NO until a live call passes. The plan's "Full backfill runs once on the laptop" and #3's fixture recording need a working route too.
 
 "Ticket 5" is read here as issue #6, on the basis that "Ticket 1" is issue #2. Tell me if that mapping is wrong.
