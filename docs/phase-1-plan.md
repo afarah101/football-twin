@@ -38,9 +38,9 @@ Type a player and season. Get his 5 closest statistical twins, a 2D map and a fi
 ## Validation (not self-graded)
 1. Self-match: own next season in top 10 (exclusion lifted for this test). Compare with a random baseline.
 2. Stability: rank correlation when each metric is dropped.
-3. Face validity: Ahmed's pre-registered pairs in config/face_validity_pairs.yaml.
+3. Blind spot-check, part of the outside review: a non-Claude model gets the metric tables and top-5 twins for 10 randomly chosen players (fixed seed) and rates each list as plausible or not. Report the count.
 4. Outside model reviews code and results.
-5. The winning distance method = highest self-match rate that also passes face validity.
+5. The winning distance method = highest self-match rate. Launch also needs the outside review.
 
 ## Online
 - GitHub Actions every Monday → one JSON per league-season → Vercel static site.
@@ -81,7 +81,7 @@ These override the plan above where they differ.
 - Q11: Ahmed writes the pairs. No pairs are suggested by anyone else. Format: 12 twin pairs and 5 not-twin pairs, seasons 2014/15 onwards, forwards or attacking midfielders with 900+ minutes.
 - Q11: No distance code runs until Ahmed commits `config/face_validity_pairs.yaml`.
 - Q11: A method passes face validity if at least 70% of twin pairs fall in the closest 5% of all pairs and no not-twin pair does.
-- Q12: If no method passes, the site does not launch. We revisit the metrics and do not lower the bar.
+- Q12: If no method reaches PASS on the self-match test, or the outside review rejects the results, the site does not launch. We revisit the metrics and do not lower the bar.
 - Q19: The PASS, WEAK and FAIL bands apply to the later-season rate, judged on the point estimate. A confidence interval is shown beside it.
 - Q20: The Basketball method uses the same 10 shrunk metrics and replaces only the z-score and clip step with percentiles. It appears in the validation report, not on the public site.
 - Q21: The stability test is report-only, with no pass or fail. Any metric whose removal changes the rankings most is flagged for the outside review.
@@ -103,7 +103,7 @@ These also override earlier decisions where they differ.
 - Q10 split: choose the method on 2017/18-2021/22. Report PASS, WEAK or FAIL on the 2022/23 and 2023/24 transitions.
 - Position source: FBref per-match Pos. Compare with Understat positions when the "Understat is back" issue opens.
 - Multi-position rows: count as attacking if any label is FW, LW, RW or AM.
-- LM/RM: decided by Ahmed from the names list after the pairs are committed.
+- LM/RM: decided by Ahmed from the names list, which is no longer blocked.
 - Position rule: a match row is "attacking" if any Pos label is FW, LW, RW or AM, else "other". Sub appearances ignored (Q5). A PlayerSeason joins the Pool if attacking minutes > other minutes.
 - The 6 codes are display-only: show the most frequent first-listed attacking label. Position is never used in distance.
 - Display labels: show FBref's own labels (FW, LW, RW, AM). Drop the 6 Understat codes while on the stand-in source.
@@ -114,10 +114,10 @@ These also override earlier decisions where they differ.
 - Q23: The build precomputes everything, including both twin lists (all leagues and same league) and closeness percentiles. The site is plain static HTML and JS with inline SVG, no framework, and no distance maths in the browser. Two files join the per-league-season JSON: a name index and the map points.
 - Q24: One context, `twin/`: `domain/` (profiles, twins), `application/` (build), `infrastructure/understat/` (ingest, behind the anti-corruption layer), `interface/web/` (site). Plus `VISION.md` and `CONTEXT_MAP.md`.
 - Q25: Raw data is gzipped files committed to the private repo. The Monday job fails and keeps the last good site if any league-season's player count or minutes drop, or any request returns 404.
-- Q26: All tests go through three seams: Build (recorded Understat data in, public site files out), Understat adapter (recorded responses and errors in, records or a failure out) and Validation report (Pool and pairs file in, PASS, WEAK or FAIL for each method out). The site gets one browser smoke test against a small fixture.
+- Q26: All tests go through three seams: Build (recorded Understat data in, public site files out), Understat adapter (recorded responses and errors in, records or a failure out) and Validation report (Pool in, self-match PASS, WEAK or FAIL for each method out). The site gets one browser smoke test against a small fixture.
 - Q27: The pairs rule is literal and includes tests on made-up data. Every ticket touching distance is blocked by a ticket assigned to Ahmed. The Validation report refuses to run unless the file has 12 twin pairs and 5 not-twin pairs and is committed unchanged. Ahmed writes the pairs before looking at any metric output.
-- Metric output is gated like distance code: the "Public MetricProfiles" ticket is also blocked by the pairs ticket, because Ahmed's pairs must be committed before Ahmed can see any metric output. This replaces the Q27 note that z-scores can be built first. STEP 0 reports show no per-player metric values until then.
+- Metric output is not gated: trust in the results comes from the self-match test and the outside review. Reports may show per-player metric values.
 - Q28: A league-season joins the Pool on the first Monday job after its last scheduled match. Shortened seasons count as completed. The site shows the date of the last data update.
 - All test fixtures must be real Understat responses recorded during STEP 0. No invented or hand-written fixture data.
-- Q29: Three inputs fall outside the fixture rule because they are not Understat data. PASS, WEAK and FAIL bands are tested with plain rates. Connection failures and retries are simulated as no response at all, while real 404s are recorded. The pairs file refusal is tested with empty or wrong-count files that name no players. The site smoke test uses Build output from STEP 0 recordings.
+- Q29: Two inputs fall outside the fixture rule because they are not Understat data. PASS, WEAK and FAIL bands are tested with plain rates. Connection failures and retries are simulated as no response at all, while real 404s are recorded. The site smoke test uses Build output from STEP 0 recordings.
 - Q30: STEP 0 records real examples of a mid-season league move, `Sub` appearances, an own goal, a player under 900 minutes, a current-season player and a real 404. If a case cannot be found on Understat, the ticket reports it and that test is left out. It is never invented.

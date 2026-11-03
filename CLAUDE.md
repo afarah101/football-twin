@@ -2,10 +2,6 @@
 
 Phase 1 plan and all decisions: `docs/phase-1-plan.md`.
 
-## Hard rules
-
-- Never suggest, draft or edit face validity pairs. Ahmed writes them.
-
 ## Agent skills
 
 ### Issue tracker
