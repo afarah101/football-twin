@@ -16,7 +16,7 @@ One exception needs your review. The rule says column names and row counts only,
 
 **The Phase 1 method cannot run on this dataset.** Five of its 10 equal-weight metrics are shot shares, which need the missing shot rows. Using this data means changing the agreed metrics, which is Ahmed's decision.
 
-**"Understat is down" has not been shown.** Two networks failed to connect, but that does not prove the site is down. The hotspot test in `docs/reports/T1_understatapi_vetting.md` is still the cheapest way to find out, and it would decide whether a stand-in is needed at all.
+**Understat does appear to be down.** An earlier version of this report said that had not been shown. Three other projects have since been found reporting the same failures, listed under "Outage evidence" in `docs/reports/T1_understatapi_vetting.md`. Those are their authors' reports, not a statement from Understat, and the cause and return date are unknown. The daily watch in `.github/workflows/understat-probe.yml` opens an issue when the site answers again.
 
 ## Findings
 
