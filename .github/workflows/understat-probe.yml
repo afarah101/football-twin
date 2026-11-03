@@ -1,0 +1,26 @@
+name: understat-probe
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Install understatapi and patched dependencies
+        run: |
+          echo "understatapi==0.7.1 --hash=sha256:7e50751ad1189e82acc6afea596733d00d7a0d74cbd492238b092d137c1ed334" > "$RUNNER_TEMP/understatapi.txt"
+          python -m pip install --no-deps --require-hashes -r "$RUNNER_TEMP/understatapi.txt"
+          python -m pip install --no-deps --only-binary :all: certifi==2026.10.23 charset-normalizer==3.5.2 idna==3.20 requests==2.34.2 urllib3==2.8.0
+      - name: Run one live call
+        run: python scripts/probe_understat.py
