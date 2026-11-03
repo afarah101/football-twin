@@ -95,6 +95,14 @@ These override the plan above where they differ.
 - Q17: The six positions stay as written. STEP 0 counts and lists who `ML`/`MR` excludes in a one-season sample, and Ahmed decides from that list.
 - Q18: If Understat's terms are silent or unreadable, the site launches with derived values only, a visible Understat credit and link, no ads, and a takedown contact. If the terms prohibit it, the site stays private.
 
+### Stand-in source (while understat.com is down)
+These also override earlier decisions where they differ.
+- Pool seasons are 2017/18-2023/24, from worldfootballR shot files + FBref positions and minutes. Extend to 2014/15 from live Understat when it returns.
+- Q10 split: choose the method on 2017/18-2021/22. Report PASS, WEAK or FAIL on the 2022/23 and 2023/24 transitions.
+- Position source: FBref per-match Pos. Compare with Understat positions when the "Understat is back" issue opens.
+- Multi-position rows: count as attacking if any label is FW, LW, RW or AM.
+- LM/RM: decided by Ahmed from the names list after the pairs are committed.
+
 ### Site and code
 - Q23: The build precomputes everything, including both twin lists (all leagues and same league) and closeness percentiles. The site is plain static HTML and JS with inline SVG, no framework, and no distance maths in the browser. Two files join the per-league-season JSON: a name index and the map points.
 - Q24: One context, `twin/`: `domain/` (profiles, twins), `application/` (build), `infrastructure/understat/` (ingest, behind the anti-corruption layer), `interface/web/` (site). Plus `VISION.md` and `CONTEXT_MAP.md`.
