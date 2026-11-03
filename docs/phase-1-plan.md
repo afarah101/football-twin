@@ -104,6 +104,9 @@ These also override earlier decisions where they differ.
 - LM/RM: decided by Ahmed from the names list after the pairs are committed.
 - Position rule: a match row is "attacking" if any Pos label is FW, LW, RW or AM, else "other". Sub appearances ignored (Q5). A PlayerSeason joins the Pool if attacking minutes > other minutes.
 - The 6 codes are display-only: show the most frequent first-listed attacking label. Position is never used in distance.
+- Display labels: show FBref's own labels (FW, LW, RW, AM). Drop the 6 Understat codes while on the stand-in source.
+- Ties: equal attacking and other minutes stays out of the Pool. Display-label tie: pick alphabetically.
+- LM/RM: stay "other" until Ahmed decides from the names list. If added, update the position rule's label list.
 
 ### Site and code
 - Q23: The build precomputes everything, including both twin lists (all leagues and same league) and closeness percentiles. The site is plain static HTML and JS with inline SVG, no framework, and no distance maths in the browser. Two files join the per-league-season JSON: a name index and the map points.
