@@ -28,7 +28,7 @@ Plan header:
 | Severity | Finding | Evidence | Action for issue #6 |
 |---|---|---|---|
 | **Critical** | Hard pins in `install_requires` bring 14 advisories: urllib3 1.26.5 (10), idna 2.10 (2), certifi 2025.11.12 (1, CVSS 9.1), requests 2.32.5 (1). Exploitability for our use was not assessed. | Step 3, Step 6d | Never use the default install. Use `--no-deps` with own pins. |
-| **Critical** | Understat is unreachable from this machine's network. This is a project problem, not a library problem. It also blocks #3 (real fixtures) and the plan's laptop backfill (#7), not only this check. GitHub Actions reach is untested, which matters for the Monday job (#13). | Step 4 | Ahmed chooses a network that can reach it. |
+| **Critical** | Understat is unreachable from this machine's network. This is a project problem, not a library problem. It also blocks #3 (real fixtures) and the plan's laptop backfill (#7), not only this check. One GitHub Actions run also failed to connect, which matters for the Monday job (#13); see "GitHub Actions probe". | Step 4, GitHub Actions probe | Ahmed chooses a network that can reach it. |
 | Warning | Live behaviour is unverified. Every library test is mocked, the one live call never reached the site, and the last release is 8 months old. | Step 4 | Repeat the live call first. |
 | Warning | Player, match and team endpoints turn **every** HTTP error into `InvalidPlayer`, `InvalidMatch` or `InvalidTeam`. A 429 or 503 looks like a bad ID. League endpoints raise a plain `HTTPError`. This matters for Q25 (fail on 404) and for retries. | Step 4, error probe. Team reads the same in code, but was not probed. | Read the status from `err.__cause__.response.status_code`. |
 | Warning | No timeout on any request. A hung connection blocks the backfill forever. | Step 4, `timeout passed by library: False` | Pass `timeout=` on each call. Kwargs reach `session.get`. |
@@ -844,11 +844,293 @@ Not UNSAFE: nothing suggests malicious behaviour, and the dependency issue is av
 
 ## Decision for Ahmed
 
-Which network should repeat the live call? It would complete vetting step 5, print field names only and show no per-player values.
-
-- **Phone hotspot or another network:** the cheapest test, with no repo changes. It uses a different ISP, so this is Ahmed's choice to make.
-- **One-off GitHub Actions run:** also answers whether the Monday job (#13) can reach Understat, but needs a workflow file and a push, which are outside this ticket's scope.
+Repeat the live call on a phone hotspot? It would complete vetting step 5, print field names only and show no per-player values. It needs no repo changes. It uses a different ISP, so this is Ahmed's choice to make.
 
 Issue #2's own criteria are met either way, but ticket 5 stays NO until a live call passes. The plan's "Full backfill runs once on the laptop" and #3's fixture recording need a working route too.
 
 "Ticket 5" is read here as issue #6, on the basis that "Ticket 1" is issue #2. Tell me if that mapping is wrong.
+
+## GitHub Actions probe
+
+Run URL: https://github.com/afarah101/football-twin/actions/runs/41552470787
+
+Commit `85372ec`, event `workflow_dispatch`, conclusion `failure`, one run, not retried. Files: `.github/workflows/understat-probe.yml` and `scripts/probe_understat.py`.
+
+**Result: the runner could not connect to Understat.** The call timed out after the 20 s connect limit, with no HTTP response.
+
+| Question | Answer |
+|---|---|
+| Can GitHub Actions reach Understat? | **No, in this one run.** |
+| Does the library return real shot rows? | **Not shown.** The request never reached the site, so this says nothing about the library. |
+| Did the install work on the runner? | Yes. The hash-pinned `understatapi` and all five patched dependencies installed and imported. |
+
+Two networks have now failed, in different ways:
+
+| Network | Failure | Meaning |
+|---|---|---|
+| Home (Virgin Media) | `Network is unreachable`, router answers `!N` at hop 3 | A router refuses the route |
+| GitHub-hosted runner | `ConnectTimeout` after 20 s | No answer to the connection attempt |
+
+What this does not show: why the runner got no answer. Understat could be down, its host could be dropping cloud addresses, or something on the route could be dropping traffic. One run also cannot rule out a passing fault. A hotspot test helps separate these: if it works, the site is up and the problem is specific to these networks.
+
+If the failure persists, a GitHub-hosted Monday job (#13) cannot fetch data, so that design would need Ahmed's decision. This workflow runs only by hand, so it stays inactive until someone starts it.
+
+Full raw log from `gh run view 41552470787 --log`, with ANSI colour codes removed:
+
+```
+probe	Set up job	2026-11-03T00:23:20.1194801Z Current runner version: '2.338.2'
+probe	Set up job	2026-11-03T00:23:20.1264915Z ##[group]Runner Image Provisioner
+probe	Set up job	2026-11-03T00:23:20.1268205Z Hosted Compute Agent
+probe	Set up job	2026-11-03T00:23:20.1269241Z Version: 20261021.618
+probe	Set up job	2026-11-03T00:23:20.1270412Z Commit: 21505ad2541d5be6135ed84fc33697146cf75b8e
+probe	Set up job	2026-11-03T00:23:20.1271836Z Build Date: 2026-10-21T00:45:21Z
+probe	Set up job	2026-11-03T00:23:20.1273049Z Worker ID: {12986e8c-4fa7-4032-b29d-3429ae8aab67}
+probe	Set up job	2026-11-03T00:23:20.1274357Z Region: eastus
+probe	Set up job	2026-11-03T00:23:20.1275402Z Cloud: Azure
+probe	Set up job	2026-11-03T00:23:20.1277298Z ##[endgroup]
+probe	Set up job	2026-11-03T00:23:20.1279994Z ##[group]Operating System
+probe	Set up job	2026-11-03T00:23:20.1281145Z Ubuntu
+probe	Set up job	2026-11-03T00:23:20.1282230Z 26.04.1
+probe	Set up job	2026-11-03T00:23:20.1283131Z LTS
+probe	Set up job	2026-11-03T00:23:20.1283933Z ##[endgroup]
+probe	Set up job	2026-11-03T00:23:20.1285033Z ##[group]Runner Image
+probe	Set up job	2026-11-03T00:23:20.1306604Z Image: ubuntu-26.04
+probe	Set up job	2026-11-03T00:23:20.1307642Z Version: 20261025.179.1
+probe	Set up job	2026-11-03T00:23:20.1309492Z Included Software: https://github.com/actions/runner-images/blob/ubuntu26/20261025.179/images/ubuntu/Ubuntu2604-Readme.md
+probe	Set up job	2026-11-03T00:23:20.1312750Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu26%2F20261025.179
+probe	Set up job	2026-11-03T00:23:20.1314618Z ##[endgroup]
+probe	Set up job	2026-11-03T00:23:20.1337439Z ##[group]GITHUB_TOKEN Permissions
+probe	Set up job	2026-11-03T00:23:20.1340496Z Contents: read
+probe	Set up job	2026-11-03T00:23:20.1341666Z Metadata: read
+probe	Set up job	2026-11-03T00:23:20.1342727Z ##[endgroup]
+probe	Set up job	2026-11-03T00:23:20.1346179Z Secret source: Actions
+probe	Set up job	2026-11-03T00:23:20.1347903Z Cache mode: write
+probe	Set up job	2026-11-03T00:23:20.1349365Z Prepare workflow directory
+probe	Set up job	2026-11-03T00:23:20.2072538Z Prepare all required actions
+probe	Set up job	2026-11-03T00:23:20.2148285Z Getting action download info
+probe	Set up job	2026-11-03T00:23:20.3750512Z Download action repository 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' (SHA:3d3c42e5aac5ba805825da76410c181273ba90b1)
+probe	Set up job	2026-11-03T00:23:20.6074462Z Download action repository 'actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0' (SHA:6d4fd22b20465ccc0f7354476588e8df7c9ca0e0)
+probe	Set up job	2026-11-03T00:23:20.8692579Z Complete job name: probe
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:20.9630696Z ##[group]Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:20.9631843Z with:
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:20.9632328Z   persist-credentials: false
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:20.9632918Z   repository: afarah101/football-twin
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:20.9637822Z   token: ***
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:20.9638292Z   ssh-strict: true
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:20.9638761Z   ssh-user: git
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:20.9639207Z   clean: true
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:20.9639683Z   sparse-checkout-cone-mode: true
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:20.9640244Z   fetch-depth: 1
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:20.9640711Z   fetch-tags: false
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:20.9641178Z   show-progress: true
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:20.9641650Z   lfs: false
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:20.9642085Z   submodules: false
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:20.9642562Z   set-safe-directory: true
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:20.9643104Z   allow-unsafe-pr-checkout: false
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:20.9643911Z ##[endgroup]
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.3490238Z Syncing repository: afarah101/football-twin
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.3493112Z ##[group]Getting Git version info
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.3494550Z Working directory is '/home/runner/work/football-twin/football-twin'
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.3652583Z [command]/usr/bin/git version
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.3724952Z git version 2.56.0
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.3899040Z ##[endgroup]
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.3909236Z Temporarily overriding HOME='/home/runner/work/_temp/06b2761c-acb5-4ab8-8598-20cce1045841' before making global git config changes
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.3912463Z Adding repository directory to the temporary git global config as a safe directory
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.3915052Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/football-twin/football-twin
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.3920731Z Deleting the contents of '/home/runner/work/football-twin/football-twin'
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.3923187Z ##[group]Determining repository object format
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.3925340Z ##[endgroup]
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.3927450Z ##[group]Initializing the repository
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.3930092Z [command]/usr/bin/git init /home/runner/work/football-twin/football-twin
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.4063195Z hint: Using 'master' as the name for the initial branch. This default branch name
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.4066336Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.4069154Z hint: to use in all of your new repositories, which will suppress this warning,
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.4071255Z hint: call:
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.4072552Z hint:
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.4074159Z hint: 	git config --global init.defaultBranch <name>
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.4092764Z hint:
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.4097081Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.4099590Z hint: 'development'. The just-created branch can be renamed via this command:
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.4101280Z hint:
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.4102596Z hint: 	git branch -m <name>
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.4103838Z hint:
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.4105894Z hint: Disable this message with "git config set advice.defaultBranchName false"
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.4110311Z Initialized empty Git repository in /home/runner/work/football-twin/football-twin/.git/
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.4113219Z [command]/usr/bin/git remote add origin https://github.com/afarah101/football-twin
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.4173171Z ##[endgroup]
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.4174897Z ##[group]Disabling automatic garbage collection
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.4223376Z [command]/usr/bin/git config --local gc.auto 0
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.4228310Z ##[endgroup]
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.4272154Z ##[group]Setting up auth
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.4307767Z Removing SSH command configuration
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.4309497Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.4323490Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.4940008Z Removing HTTP extra header
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.4942448Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.4974815Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.5271105Z Removing includeIf entries pointing to credentials config files
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.5273718Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.5311263Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.5619157Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-eb557ed9-df3e-40d4-8335-ae322b6fe0f7.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.5659001Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/football-twin/football-twin/.git.path /home/runner/work/_temp/git-credentials-eb557ed9-df3e-40d4-8335-ae322b6fe0f7.config
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.5698081Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/football-twin/football-twin/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-eb557ed9-df3e-40d4-8335-ae322b6fe0f7.config
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.5740419Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-eb557ed9-df3e-40d4-8335-ae322b6fe0f7.config
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.5778821Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-eb557ed9-df3e-40d4-8335-ae322b6fe0f7.config
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.5815980Z ##[endgroup]
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.5817996Z ##[group]Fetching the repository
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.5824197Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +85372ec0d08fdc79e1df5ea20a312883a98dc2b4:refs/remotes/origin/main
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.8785350Z From https://github.com/afarah101/football-twin
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.8789382Z  * [new ref]         85372ec0d08fdc79e1df5ea20a312883a98dc2b4 -> origin/main
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.8795940Z [command]/usr/bin/git branch --list --remote origin/main
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.8828727Z   origin/main
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.8835324Z [command]/usr/bin/git rev-parse refs/remotes/origin/main
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.8864153Z 85372ec0d08fdc79e1df5ea20a312883a98dc2b4
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.8874285Z ##[endgroup]
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.8877170Z ##[group]Determining the checkout info
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.8879827Z ##[endgroup]
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.8881937Z [command]/usr/bin/git sparse-checkout disable
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.8933738Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.8972617Z ##[group]Checking out the ref
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.8976344Z [command]/usr/bin/git checkout --progress --force -B main refs/remotes/origin/main
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.9055088Z Switched to a new branch 'main'
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.9067464Z branch 'main' set up to track 'origin/main'.
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.9075814Z ##[endgroup]
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.9132718Z [command]/usr/bin/git log -1 --format=%H
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.9175063Z 85372ec0d08fdc79e1df5ea20a312883a98dc2b4
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.9179779Z ##[group]Removing auth
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.9180913Z Removing SSH command configuration
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.9182558Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.9225009Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.9519712Z Removing HTTP extra header
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.9524378Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.9566192Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.9860581Z Removing includeIf entries pointing to credentials config files
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.9864398Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.9889475Z includeif.gitdir:/home/runner/work/football-twin/football-twin/.git.path
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.9898400Z includeif.gitdir:/home/runner/work/football-twin/football-twin/.git/worktrees/*.path
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.9903553Z includeif.gitdir:/github/workspace/.git.path
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.9907077Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.9917937Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/football-twin/football-twin/.git.path
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.9935225Z /home/runner/work/_temp/git-credentials-eb557ed9-df3e-40d4-8335-ae322b6fe0f7.config
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:21.9952720Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/football-twin/football-twin/.git.path \/home\/runner\/work\/_temp\/git\-credentials\-eb557ed9\-df3e\-40d4\-8335\-ae322b6fe0f7\.config
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:22.0008696Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/football-twin/football-twin/.git/worktrees/*.path
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:22.0029348Z /home/runner/work/_temp/git-credentials-eb557ed9-df3e-40d4-8335-ae322b6fe0f7.config
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:22.0045548Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/football-twin/football-twin/.git/worktrees/*.path \/home\/runner\/work\/_temp\/git\-credentials\-eb557ed9\-df3e\-40d4\-8335\-ae322b6fe0f7\.config
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:22.0109021Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:22.0139610Z /github/runner_temp/git-credentials-eb557ed9-df3e-40d4-8335-ae322b6fe0f7.config
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:22.0151689Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path \/github\/runner_temp\/git\-credentials\-eb557ed9\-df3e\-40d4\-8335\-ae322b6fe0f7\.config
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:22.0196324Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:22.0214611Z /github/runner_temp/git-credentials-eb557ed9-df3e-40d4-8335-ae322b6fe0f7.config
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:22.0231128Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path \/github\/runner_temp\/git\-credentials\-eb557ed9\-df3e\-40d4\-8335\-ae322b6fe0f7\.config
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:22.0275562Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:22.0575451Z Removing credentials config '/home/runner/work/_temp/git-credentials-eb557ed9-df3e-40d4-8335-ae322b6fe0f7.config'
+probe	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:22.0584198Z ##[endgroup]
+probe	Run actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0	2026-11-03T00:23:22.0979303Z ##[group]Run actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+probe	Run actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0	2026-11-03T00:23:22.0981410Z with:
+probe	Run actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0	2026-11-03T00:23:22.0982229Z   python-version: 3.12
+probe	Run actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0	2026-11-03T00:23:22.0983235Z   check-latest: false
+probe	Run actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0	2026-11-03T00:23:22.0994810Z   token: ***
+probe	Run actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0	2026-11-03T00:23:22.0996313Z   mirror: https://raw.githubusercontent.com/actions/python-versions/main
+probe	Run actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0	2026-11-03T00:23:22.0998286Z   update-environment: true
+probe	Run actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0	2026-11-03T00:23:22.0999386Z   allow-prereleases: false
+probe	Run actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0	2026-11-03T00:23:22.1000451Z   freethreaded: false
+probe	Run actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0	2026-11-03T00:23:22.1001395Z ##[endgroup]
+probe	Run actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0	2026-11-03T00:23:22.2299025Z ##[group]Installed versions
+probe	Run actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0	2026-11-03T00:23:22.2591877Z Successfully set up CPython (3.12.15)
+probe	Run actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0	2026-11-03T00:23:22.2619927Z ##[endgroup]
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:22.2831579Z ##[group]Run echo "understatapi==0.7.1 --hash=sha256:7e50751ad1189e82acc6afea596733d00d7a0d74cbd492238b092d137c1ed334" > "$RUNNER_TEMP/understatapi.txt"
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:22.2838908Z ^[[36;1mecho "understatapi==0.7.1 --hash=sha256:7e50751ad1189e82acc6afea596733d00d7a0d74cbd492238b092d137c1ed334" > "$RUNNER_TEMP/understatapi.txt"^[[0m
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:22.2844415Z ^[[36;1mpython -m pip install --no-deps --require-hashes -r "$RUNNER_TEMP/understatapi.txt"^[[0m
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:22.2850223Z ^[[36;1mpython -m pip install --no-deps --only-binary :all: certifi==2026.10.23 charset-normalizer==3.5.2 idna==3.20 requests==2.34.2 urllib3==2.8.0^[[0m
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:22.3014343Z shell: /usr/bin/bash -e {0}
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:22.3015814Z env:
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:22.3017076Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.15/x64
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:22.3019218Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib/pkgconfig
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:22.3021369Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:22.3023357Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:22.3025325Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:22.3027434Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:22.3029090Z ##[endgroup]
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:25.4906270Z Collecting understatapi==0.7.1 (from -r /home/runner/work/_temp/understatapi.txt (line 1))
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:25.7793953Z   Downloading understatapi-0.7.1.tar.gz (537 kB)
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:25.9964470Z      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 537.7/537.7 kB 4.5 MB/s  0:00:00
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:26.0516593Z   Installing build dependencies: started
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:28.6498855Z   Installing build dependencies: finished with status 'done'
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:28.6506546Z   Getting requirements to build wheel: started
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:29.2304187Z   Getting requirements to build wheel: finished with status 'done'
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:29.2326747Z   Preparing metadata (pyproject.toml): started
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:29.4808554Z   Preparing metadata (pyproject.toml): finished with status 'done'
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:29.4834362Z Building wheels for collected packages: understatapi
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:29.4845186Z   Building wheel for understatapi (pyproject.toml): started
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:29.7655053Z   Building wheel for understatapi (pyproject.toml): finished with status 'done'
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:29.7671680Z   Created wheel for understatapi: filename=understatapi-0.7.1-py3-none-any.whl size=15443 sha256=d593d683620356800cdc18f7a6a89c1b0e1b547c2c709bf4c7bcf72a1c286c0b
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:29.7691847Z   Stored in directory: /home/runner/.cache/pip/wheels/38/de/d6/f84cd8cb7746c9685b36beb27b8840f43e8b3f93cf288343c5
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:29.7698261Z Successfully built understatapi
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:29.7836647Z Installing collected packages: understatapi
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:29.8037870Z Successfully installed understatapi-0.7.1
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:29.8063479Z 
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:29.8064241Z [notice] A new release of pip is available: 26.2.2 -> 26.3
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:29.8067375Z [notice] To update, run: pip install --upgrade pip
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:31.0087125Z Collecting certifi==2026.10.23
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:31.2376823Z   Downloading certifi-2026.10.23-py3-none-any.whl.metadata (2.5 kB)
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:31.5418769Z Collecting charset-normalizer==3.5.2
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:31.6139321Z   Downloading charset_normalizer-3.5.2-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (46 kB)
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:31.7607166Z Collecting idna==3.20
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:31.8322986Z   Downloading idna-3.20-py3-none-any.whl.metadata (7.2 kB)
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:31.9204823Z Collecting requests==2.34.2
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:31.9947204Z   Downloading requests-2.34.2-py3-none-any.whl.metadata (4.8 kB)
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:32.0698959Z Collecting urllib3==2.8.0
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:32.1420849Z   Downloading urllib3-2.8.0-py3-none-any.whl.metadata (7.4 kB)
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:32.2249191Z Downloading certifi-2026.10.23-py3-none-any.whl (135 kB)
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:32.3823818Z Downloading charset_normalizer-3.5.2-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (257 kB)
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:32.5299280Z Downloading idna-3.20-py3-none-any.whl (69 kB)
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:32.6076397Z Downloading requests-2.34.2-py3-none-any.whl (73 kB)
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:32.6853447Z Downloading urllib3-2.8.0-py3-none-any.whl (135 kB)
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:32.7226031Z Installing collected packages: urllib3, requests, idna, charset-normalizer, certifi
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:32.9591013Z 
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:32.9591060Z 
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:32.9606079Z [notice] A new release of pip is available: 26.2.2 -> 26.3
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:32.9607053Z Successfully installed certifi-2026.10.23 charset-normalizer-3.5.2 idna-3.20 requests-2.34.2 urllib3-2.8.0
+probe	Install understatapi and patched dependencies	2026-11-03T00:23:32.9646660Z [notice] To update, run: pip install --upgrade pip
+probe	Run one live call	2026-11-03T00:23:33.0096125Z ##[group]Run python scripts/probe_understat.py
+probe	Run one live call	2026-11-03T00:23:33.0096650Z ^[[36;1mpython scripts/probe_understat.py^[[0m
+probe	Run one live call	2026-11-03T00:23:33.0130027Z shell: /usr/bin/bash -e {0}
+probe	Run one live call	2026-11-03T00:23:33.0130341Z env:
+probe	Run one live call	2026-11-03T00:23:33.0130679Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.15/x64
+probe	Run one live call	2026-11-03T00:23:33.0131251Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib/pkgconfig
+probe	Run one live call	2026-11-03T00:23:33.0131821Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+probe	Run one live call	2026-11-03T00:23:33.0132356Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+probe	Run one live call	2026-11-03T00:23:33.0132919Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+probe	Run one live call	2026-11-03T00:23:33.0133521Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib
+probe	Run one live call	2026-11-03T00:23:33.0133992Z ##[endgroup]
+probe	Run one live call	2026-11-03T00:23:53.5277384Z python 3.12.15
+probe	Run one live call	2026-11-03T00:23:53.5278616Z understatapi 0.7.1
+probe	Run one live call	2026-11-03T00:23:53.5279329Z requests 2.34.2
+probe	Run one live call	2026-11-03T00:23:53.5279928Z urllib3 2.8.0
+probe	Run one live call	2026-11-03T00:23:53.5280467Z idna 3.20
+probe	Run one live call	2026-11-03T00:23:53.5281174Z certifi 2026.10.23
+probe	Run one live call	2026-11-03T00:23:53.5281782Z charset-normalizer 3.5.2
+probe	Run one live call	2026-11-03T00:23:53.5282482Z error type: ConnectTimeout
+probe	Run one live call	2026-11-03T00:23:53.5283162Z http status from err.__cause__: None
+probe	Run one live call	2026-11-03T00:23:53.5285812Z error detail: HTTPSConnectionPool(host='understat.com', port=443): Max retries exceeded with url: /getPlayerData/2371 (Caused by ConnectTimeoutError(<HTTPSConnection(host='understat.com', port=443) at 0x704e83206450>, 'Connection to understat.com timed out. (connect timeout=20)'))
+probe	Run one live call	2026-11-03T00:23:53.5289773Z http status: None
+probe	Run one live call	2026-11-03T00:23:53.5290508Z http responses received: 0
+probe	Run one live call	2026-11-03T00:23:53.5291299Z rows returned: no
+probe	Run one live call	2026-11-03T00:23:53.5498278Z ##[error]Process completed with exit code 1.
+probe	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:53.5656091Z Post job cleanup.
+probe	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:53.6646645Z [command]/usr/bin/git version
+probe	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:53.6769037Z git version 2.56.0
+probe	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:53.6849648Z Temporarily overriding HOME='/home/runner/work/_temp/7bea692d-be0e-4c4b-9c77-bd0528cdc399' before making global git config changes
+probe	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:53.6866586Z Adding repository directory to the temporary git global config as a safe directory
+probe	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:53.6886911Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/football-twin/football-twin
+probe	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:53.6888917Z Removing SSH command configuration
+probe	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:53.6889634Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+probe	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:53.6946011Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+probe	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:53.7432773Z Removing HTTP extra header
+probe	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:53.7448941Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+probe	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:53.7473525Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+probe	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:53.8187164Z Removing includeIf entries pointing to credentials config files
+probe	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:53.8206569Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+probe	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-11-03T00:23:53.8266862Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+probe	Complete job	2026-11-03T00:23:53.8882713Z Cleaning up orphan processes
+```
