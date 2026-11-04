@@ -13,14 +13,14 @@ Run date: 2026-11-03. Issue: #7. Repo position at the first trim: `39b1c3a`, lev
 | Nothing is fetched from the network | **Met**: both runs had network access denied |
 | Counts per league-season match the STEP 0 coverage report | **Met, with one stated exception**: ITA 2023/24 goes from 383 to 379 URLs, because the de-duplication asked for removes 4 spellings. All other counts match. |
 
-**Ready for #6: YES.** The date link is decided and `data/standin/` holds what it needs. The club map still needs Ahmed's review, but no unmapped club has a Pool-season match.
+**Ready for #6: YES.** The date link is decided and `data/standin/` holds what it needs. Ahmed has reviewed and approved the club map, see section 9.
 
 ## Findings
 
 | Severity | Finding | Section |
 |---|---|---|
 | Warning for #6 | Rule 2 must use the decided link, not an exact date. An exact-date link leaves 19 Pool matches unmatched. The decided link leaves 3 (73 shot rows), which have no rows in the FBref player stat files. FBref's event files do hold 2 of them (Bochum v Borussia M.Gladbach 6 rows, Verona v Roma 10 rows), so those 2 are in FBref but have no minutes. The other 16 (384 shot rows) link with gaps of 1, 2 or 11 days. | 10 |
-| Warning, **needs Ahmed to review** | Club map: 43 mappings are not exact name matches, and 14 clubs are unmapped. All 14 are Understat-only clubs, and none has a Pool-season match. Both lists are in section 9. Two to look at: `Real Oviedo` to `Oviedo` rests on 4 matches, and `Parma` and `Parma Calcio 1913` both reach `Parma`. | 9 |
+| Warning, **approved by Ahmed**, see section 9 | Club map: 43 mappings are not exact name matches, and 14 clubs are unmapped. All 14 are Understat-only clubs, and none has a Pool-season match. Both lists are in section 9. Two were flagged for the review: `Real Oviedo` to `Oviedo` rests on 4 matches, and `Parma` and `Parma Calcio 1913` both reach `Parma`, in different seasons. | 9 |
 | Warning | Combining per player would have been wrong. One player can have different hrefs in different files for one match, which gives 201 cases of one name counted twice in a team's match, and team-match minutes up to 1170. Each match therefore comes whole from one file, and the maximum is 990. | 4 |
 | Warning | Majority `Pos` matches players by the 8-character id only, as asked. A player with different ids in different files gets fewer votes, which `Pos_Files_Voted` shows. | 4 |
 | Warning for #6 | Key players on the 8-character id inside `Player_Href`, not the whole value. 40 id-seasons hold several spellings of the href. | 7 |
@@ -44,7 +44,7 @@ Run date: 2026-11-03. Issue: #7. Repo position at the first trim: `39b1c3a`, lev
 4. Majority `Pos`. The trim applies it, because `data/standin/` holds one `Pos` per row and #6 would have nothing to count. Each row records `Pos_Files_Voted` and `Pos_Tie`.
 5. #6 re-cuts `tests/fixtures/standin/` from `data/standin/`. Those fixtures still hold the original schema.
 
-**Open for Ahmed:** the club map review in section 9, the 50 pairs in `docs/reports/name_map_sample.csv`, and the `partial_join` player-seasons under "Joining shots to players".
+**Open for Ahmed:** the 50 pairs in `docs/reports/name_map_sample.csv`, and the `partial_join` player-seasons under "Joining shots to players".
 
 ## Known limits, from the audit of `6666192`
 
@@ -57,7 +57,7 @@ Logged, not fixed. The numbers here come from that audit, not from output in thi
 | F4 | The shot `league` column has two spellings in 3 files: `La_liga` and `La liga`, `Ligue_1` and `Ligue 1`, `Serie_A` and `Serie A`. Take the league from the file name, as T3 does. |
 | F8 | The opening line says the check scripts are in the appendix, but `link_and_check.py` from Step 0 is not. The audit reproduced its result separately: 38 of 38 hashes agree. |
 | F9 | The audit did not re-run the `pyreadr` check, the mutation test or the fresh-venv run, and has no record to check the code review log against. Ahmed's two re-date checks are not from the data files. An outside source confirms Caen v Toulouse. For Udinese v Roma, only the shot minutes are consistent with it. |
-| F10 | "Ready for #6: YES" stands while the club map review is open. The audit found no wrong mapping among the 43. |
+| F10 | Closed. "Ready for #6: YES" stood while the club map review was open, and Ahmed has since approved the map, see section 9. |
 | F11 | The plan's "Each ordered pair plays once per season" holds only after the tie-breaker filter. Spezia v Hellas Verona appears twice in 2022/23. The nearest date still picks the right match. |
 
 ## Joining shots to players, measured for #6
@@ -89,6 +89,7 @@ Partly joined before anchors: 20, holding 255 unjoined rows | now fully joined 1
 partial_join = yes: 149 player-seasons | some rows joined 5, holding 25 unjoined rows | no rows joined 144, holding 2286 rows
 Collisions: 0
 Pool candidates with shots: 3109 of 3136 (99.14%)
+Pool until Ahmed's review: 3108 of 3136 candidates
 ```
 
 - **Change from taking the club from rosters:** compared with the measurement in `03a9277`, which the script no longer reproduces, joined rows after the guard go from 314,630 to 314,844, and id collisions from 3 to 0. Luis Suárez ESP 2021/22, Raúl García ESP 2023/24 and Danilo ITA 2019/20 no longer collide.
@@ -107,7 +108,7 @@ Pool candidates with shots: 3109 of 3136 (99.14%)
   - **Some rows joined, 5, 25 unjoined rows:** Jeffinho FRA 2022/23 (1 of 10), Chema Rodríguez ESP 2019/20 (1 of 3), Rasmus Kristensen ITA 2023/24 (4 of 10), Randy Nteka ESP 2023/24 (8 of 15) and Dennis Johnsen ITA 2021/22 (14 of 15, 93.3%). Only Johnsen is a Pool candidate.
   - **No rows joined, 144, 2,286 rows:** listed below. These have no FBref id at all, for example Isi Palazón, Ruslan Malinovskiy, Juan Camilo Hernández and Simy.
   - **Above the line, no flag:** Marc Cardona ESP 2023/24 has 21 of 22 rows joined (95.5%).
-  - **Pool candidates, 28:** Dennis Johnsen above, and the 27 Pool candidates with no joined shots, which the plan's rule also flags because they hold no link to their Understat rows. They include Ruslan Malinovskyi, Isaac Palazón Camacho, Cucho and Javier Hernández. Some are the same people as the 144, seen from the FBref side, so the two counts do not add up to a total.
+  - **Pool candidates, 28, out of the Pool until Ahmed reviews them:** this leaves 3,108 of 3,136. They are Dennis Johnsen above and the 27 Pool candidates with no joined shots, which the plan's rule also flags because they hold no link to their Understat rows. They include Ruslan Malinovskyi, Isaac Palazón Camacho, Cucho and Javier Hernández. Some are the same people as the 144, seen from the FBref side, so the two counts do not add up to a total.
 - **One Understat id on 2+ FBref ids:** Joseph N'Duquidi FRA 2023/24 and Gabriel Strefezza ITA 2023/24. These are the known two-id players that the plan's id merge handles.
 - **Still unjoined:** 2,312 rows. The largest are Ruslan Malinovskiy (261 rows in ITA), Isi Palazón (224), Juan Camilo Hernández (153), Simy (128) and Silas Wamangituka (112). 27 Pool candidates have no joined shots, for example Javier Hernández ("Chicharito"), Cucho and Silas Katompa.
 - **Named cases:** Raul García 8042 to FBref's Raúl `18f0a9f0`; Raúl García 5114 to `1a317a1b`; Bruno 2302 to Bruno Soriano `09332647`; Ousmane Camara 11016 to `7d3dfdfd` and 11249 to `5a6b06cd`; Luis Suárez 2098 to `a6154613` and 8978 to Luis Javier Suárez `eeba07f8`; Danilo 2244 to `94b2001f` and 1140 to Danilo Larangeira `fed5f993`.
@@ -687,7 +688,15 @@ Pool matches not linked on the exact date 19 | rows 457
 
 `data/standin/club_map.csv` is built from the trimmed files: same date, same pair of clubs. Same names map first. Each other club then takes the FBref club most often found opposite an already mapped opponent on the same date, and a tied or absent count leaves it unmapped. Columns: `league`, `understat_club`, `fbref_club`, `exact_name`, `linked_matches`. `linked_matches` covers all seasons and needs the exact date, so it can be lower than the true count.
 
-For Ahmed to review: every unmapped club and every mapping that is not an exact name match. No FBref club is unmapped.
+**Reviewed and approved by Ahmed, 2026-11-04.** Evidence from the independent audit of `6666192`: 0 wrong mappings among the 43 that are not exact name matches, 0 FBref clubs reached by 2 Understat names in the same season, and 0 unmapped clubs with a Pool-season match. The last two, and the counts of 43 and 14, also hold when re-checked on the current `club_map.csv` and shot files:
+
+```
+non-exact mapped 43 | unmapped understat 14
+unmapped clubs with a Pool-season match 0
+FBref clubs reached by 2 names in one season, all seasons 0 | Pool seasons 0
+```
+
+The lists below stay for the record: every unmapped club and every mapping that is not an exact name match. No FBref club is unmapped.
 
 ## 10. Rule 2 links
 

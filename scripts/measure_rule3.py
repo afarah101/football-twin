@@ -474,7 +474,8 @@ def main():
     print(f"Partly joined before anchors: {len(before_anchors)}, holding {sum(total - found for found, total in before_anchors.values())} unjoined rows | now fully joined {sum(key not in after_anchors for key in before_anchors)} | still partly joined {len(after_anchors)}, holding {sum(total - found for found, total in after_anchors.values())} unjoined rows")
     print("Still partly joined at 95% or above, so no flag:", [(key, value) for key, value in after_anchors.items() if key not in partial])
     print(f"partial_join = yes: {len(partial)} player-seasons | some rows joined {len(partly_joined)}, holding {sum(total - found for found, total in partly_joined.values())} unjoined rows | no rows joined {len(none_joined)}, holding {sum(total for _, total in none_joined.values())} rows")
-    print(f"Pool candidates holding a partial_join: {sorted((key[0], key[1], names[key[2]]) for key in pool_set if any((key[0], key[1] - 1) == found[:2] and key[2] in ids_of_season[found] for found in partly_joined))}")
+    pool_partly_joined = sorted((key[0], key[1], names[key[2]]) for key in pool_set if any((key[0], key[1] - 1) == found[:2] and key[2] in ids_of_season[found] for found in partly_joined))
+    print(f"Pool candidates holding a partial_join: {pool_partly_joined}")
     print("Some rows joined, as league, season, id, names, joined, total, percent, FBref ids, Pool candidate:")
     for key, (found, total) in sorted(partly_joined.items(), key=lambda item: (item[1][0] / item[1][1], item[0])):
         print(f"  {key[0]} {key[1]} {key[2]} {sorted(names_of_season[key])} {found} of {total} ({100 * found / total:.1f}%) {sorted(ids_of_season[key])} Pool: {[(key[0], key[1] + 1, fbref_id) in pool_set for fbref_id in sorted(ids_of_season[key])]}")
@@ -537,6 +538,7 @@ def main():
     no_shots = sorted((key[0], key[1], names[key[2]]) for key in pool if key not in with_shots)
     print(f"\nPool candidates with shots: {len(pool) - len(no_shots)} of {len(pool)} ({100 * (len(pool) - len(no_shots)) / len(pool):.2f}%)")
     print(f"No joined shots, so partial_join = yes: {len(no_shots)}: {no_shots}")
+    print(f"Pool until Ahmed's review: {len(pool) - len(no_shots) - len(pool_partly_joined)} of {len(pool)} candidates")
 
     final_pairs = {pair_of[group] for group, link in final.items() if link[0] == "map"}
     sampled = write_sample(final_pairs, guard, names, name_map_rows, matches_of)
