@@ -12,7 +12,7 @@ The Twin model needs PlayerSeason and shot records, but its data sits in three p
 
 ## Solution
 
-One join module takes raw rows to the final join, and `scripts/measure_rule3.py` imports it, so only one version exists. A stand-in loader sits behind the interface the live adapter will use, and returns two lists of plain records. It fails loudly on a wrong file. One command writes a report listing every flagged, barred, stopped or unexplained case, with the key Ahmed would use to review it.
+One join module takes raw rows to the final join, and `scripts/measure_rule3.py` imports it, so only one version exists. A stand-in loader sits behind the interface the live adapter will use, and returns two lists of plain records, plus whether its source may publish. It fails loudly on a wrong file. One command writes a report listing every flagged, barred, stopped or unexplained case, with the key Ahmed would use to review it.
 
 ## Fixed facts
 
@@ -76,7 +76,7 @@ Merges on: joined 315073 | Pool 3109 of 3137
 | Ref | Decision |
 |---|---|
 | Q1, open question 3 in #6 | The id merges run first, as one named step on the FBref rows, before exact matching. The join only ever sees merged ids, so the stop runs after the merges. `measure_rule3.py` imports that same path and runs it with merges on and off, checking both Pool counts. |
-| Q2, open question 1 in #6 | A link stopped by the 2+ FBref ids rule counts as an existing key. The report lists it with its key and both minutes totals. `approve` restores it for all that player's shots on that key, `reject` leaves it removed, and `link_to` sends the rows to the named id. |
+| Q2, open question 1 in #6 | A link stopped by the 2+ FBref ids rule counts as an existing key. The report lists it with its key and both minutes totals. `approve` restores it for all that player's shots on that key, `reject` leaves it removed, and `link_to` sends the rows to the named id. An approved link that leaves 2 FBref ids also needs a `cross_season_ids` row, and the error says so. |
 | Q3, open question 2 in #6 | Two FBref ids with different names do not merge automatically. Both links stand, and the report lists the case. If either id is a Pool candidate, it is flagged and held until reviewed. The run also fails until a `cross_season_ids` row allows it. |
 | Q4, open question 4 in #6 | A stopped player-season gains no `season_anchor` links. |
 | Q5 | Season totals are found by the player-season's shot names, then the linked FBref name. If 2+ rows match, keep the one with the linked club in its team list. |
@@ -85,13 +85,13 @@ Merges on: joined 315073 | Pool 3109 of 3137
 | Q7 | Survivor rule, below. |
 | Q8 | Records and interface, below. |
 | Stages | Ticket 1 is one ticket in ordered stages A to D. Each stage is one commit, lists its clauses as checkboxes with the test for each, and ends with the number check. A build session can stop after any stage. |
-| Shot check | Totals against all shot rows minus own goals. The run fails if a Pool candidate's gap is over 3. Do not raise the limit. If a later run fails on Roger, the run stops and Ahmed reviews it. |
-| No season totals | If any Pool candidate has no season-totals row, the run fails and names the player, so "stop and ask" is real. See D4. |
+| Shot check | Totals against all shot rows minus own goals. The run fails if a Pool candidate that no other flag holds has a gap over 3. It runs after the review decisions. Do not raise the limit. If a later run fails on Roger, the run stops and Ahmed reviews it. |
+| No season totals | If a Pool candidate that no other flag holds has no season-totals row, the run fails and names the player, so "stop and ask" is real. See D4. |
 | First post | Not in #6. See "Publishing gate (not in #6)". |
 
 ### Rule wording, as approved
 
-> **`pool_candidate` with `link_to`.** The candidate's FBref id and `fbref_id` become one PlayerSeason under `fbref_id`, before any PlayerSeason total is worked out. Minutes, position rows and joined shots of both ids are added together. The Pool test and every per-90 metric read the combined record, so #8 never sees the split. If the two ids share a match, #6 stops with an error. If combining puts two Understat ids on one FBref id, #6 stops and names both ids, and the fix is a `merge_ids` row on the link. If the combined record fails the Pool test, it stays out and the report lists it.
+> **`player_season` with `link_to`.** The candidate's FBref id and `fbref_id` become one PlayerSeason under `fbref_id`, before any PlayerSeason total is worked out. Minutes, position rows and joined shots of both ids are added together. The Pool test and every per-90 metric read the combined record, so #8 never sees the split. If the two ids share a match, #6 stops with an error. If combining puts two Understat ids on one FBref id, #6 stops and names both ids, and the fix is a `merge_ids` row on the link. If the combined record fails the Pool test, it stays out and the report lists it.
 
 > **Stop and anchors.** A player-season stopped by the 2+ FBref ids rule gains no `season_anchor` link. Step 3 still works out the link it would have made and lists it as barred, with its `season_anchor` key. Approving a stopped link does not lift the bar. Each barred link comes back only through its own `approve` or `link_to` row.
 
@@ -99,9 +99,27 @@ Merges on: joined 315073 | Pool 3109 of 3137
 
 > **Cross-season check, on every merges-on run.** After the join and the review decisions, the run fails if any Understat id reaches 2+ FBref ids across seasons, unless a review decision allows it. The allowing row is `item_type = cross_season_ids`, key `understat_id`, `decision = approve`. Any other decision on it stops the run. The #6 report lists each case with its seasons and minutes. MEASURED: 0 today, with the survivor rule.
 
+### What a review key covers
+
+These rules settle how the existing rows work. They add no row type and no column.
+
+**`player_season`:** one row per key, and it covers every reason that key is flagged, so no field is needed to say which reason. A key exists if the FBref id is a Pool candidate flagged for any reason (no joined shots, `partial_join`, two ids with different names, a shot gap over 3, no single totals row), or if it is one of the ids in a refused merge. A row on any other key stops as stale, so a normal `approve` for Dennis Johnsen is valid whatever his shot gap.
+
+| Decision | Result |
+|---|---|
+| `approve` | Back in the Pool. A gap over 3 then passes and is listed. It stops if the candidate has no joined shots (plan:144) or no single totals row (D4). On a refused merge outside the candidates, it stops |
+| `reject` | Stays held, and the run passes. It clears a gap failure and a no-totals failure. On a refused merge, the ids stay apart and the case stays listed |
+| `link_to` | The two records combine under `fbref_id`, using the approved wording above. Then every check runs again on the combined record, including the totals lookup with both ids' names. If it still fails, the run fails again and names the player, and Ahmed replaces the row with `reject` |
+
+Refused merges with shared matches stop on `link_to`, because of the shared-match rule, so `reject` is their only route.
+
+**`partial_join`:** a key exists for any player-season with an unjoined row, flagged or not. `link_to` joins those rows. This is the route for Marc Cardona's 1 unjoined row and for 2+ candidate groups on unflagged player-seasons. A row on a player-season with no unjoined row stops as stale.
+
+**When these keys appear:** the flags for no joined shots, `partial_join`, two ids and refused merges exist by stage D of #17. The flags for a shot gap and no totals arrive with #19, which extends the same rule.
+
 ### Records and interface
 
-The interface returns two lists of frozen dataclass records, and nothing else. It holds no stand-in word.
+The interface returns one frozen `LoadedSource`, and nothing else: the two lists of frozen dataclass records, `source` and `may_publish`. It holds no stand-in word. `source` is a value, for example `standin`.
 
 **`PlayerSeason`:** every player in the source's seasons, including defenders and players under 900 minutes.
 
@@ -119,9 +137,23 @@ The interface returns two lists of frozen dataclass records, and nothing else. I
 **Where the rest goes:**
 - The Pool rule moves to `twin/domain/`: 900 or more minutes, attacking above other, and not held. `measure_rule3.py` imports it.
 - `name_match`, `minutes_check`, `date_gap_days`, `sub_status`, `min_missing` and `partial_join` stay in the stand-in's review output and the report. The domain sees only `held_for_review`.
+- `held_for_review` means no shot or per-90 metric may be used (plan:137). It is set on every flagged PlayerSeason, including those outside the candidates. MEASURED: 32 held, 28 of them Pool candidates and 4 outside, for example Jeffinho FRA 2022/23 (design check). Their Shot records stay in the list, and the Pool rule keeps them out of every metric.
 - Unjoined and dropped shots are not in the records. They are counted in the report.
 
 **One limit:** `player_id` means the FBref id here and the Understat id on live data. #16 re-validates on live data, so nothing carries over.
+
+### The publishing guard
+
+`may_publish` belongs to the source, so it sits on `LoadedSource` and not on `PlayerSeason` or `Shot`. It defaults to False.
+
+| Where | Rule |
+|---|---|
+| Stand-in loader, #19 | Always False. It never sets the field, and no review row or flag can change it |
+| Live adapter, #15 | False by default. True only when `docs/publishing_gate.csv`, read from the commit being run, records every human gate check from #13 as done, with reviewer name and date. Code alone can never set it True |
+| Any publishing step, #13 | Fails the run unless `may_publish` is True, and the error names the source. A private local build is not a publishing step |
+| Public file, #8 | Any step that writes a public file reads `LoadedSource.may_publish` and fails the run unless it is True, naming the source. |
+
+The real test is `test_standin_loader_may_publish_is_always_false`, in #19. The failing check is an unchecked box on #13. The stand-in has no way back on purpose: the only route to publishing is the live adapter and the committed gate file.
 
 ### What counts as a wrong file
 
@@ -136,6 +168,7 @@ Each of these fails with one named error that gives the file, the reason and the
 | Its SHA-256 differs from `MANIFEST.md` | Same. The trim rewrites the manifest |
 | The folder has no `MANIFEST.md` | Same |
 | `review_decisions.csv` is missing or has 0 bytes | Restore it from git |
+| `review_decisions.csv` is missing a column | Restore the column by hand or from git. The trim cannot rebuild this file |
 
 A header-only `review_decisions.csv` is valid and means no decisions. All file reads go through one place, `twin/infrastructure/standin/files.py`.
 
@@ -143,7 +176,7 @@ A header-only `review_decisions.csv` is valid and means no decisions. All file r
 
 | Path | Holds |
 |---|---|
-| `twin/domain/` | `PlayerSeason`, `Shot`, the interface, the Pool rule |
+| `twin/domain/` | `PlayerSeason`, `Shot`, `LoadedSource`, the interface, the Pool rule |
 | `twin/infrastructure/standin/player_join.py` | Rule 2, id merges, rule 3, review decisions |
 | `twin/infrastructure/standin/` | The loader and `files.py` |
 | `tests/test_player_join.py` | The clause tests |
@@ -167,7 +200,7 @@ The 4 open questions map to these tests in #17:
 | Open question in #6 | Tests |
 |---|---|
 | 1. A stopped link has no review route | `test_b_synthetic_stopped_link_is_listed_with_its_key`, `test_d_synthetic_approve_restores_stopped_link`, `test_d_synthetic_reject_leaves_stopped_link_removed`, `test_d_synthetic_link_to_redirects_stopped_link` |
-| 2. Two ids with different names | `test_b_synthetic_two_ids_with_different_names_keep_both_links`, `test_c_synthetic_two_id_pool_candidate_is_held` |
+| 2. Two ids with different names | `test_b_synthetic_two_ids_with_different_names_keep_both_links`, `test_c_synthetic_two_id_candidate_is_held` |
 | 3. Stop and merge order | `test_b_synthetic_merged_ids_do_not_trigger_the_stop`, `test_a_merges_off_leaves_two_ids_apart` |
 | 4. The stop and season anchors | `test_b_synthetic_stopped_player_season_gains_no_anchor`, `test_d_synthetic_approving_stopped_link_keeps_the_bar`, `test_d_synthetic_barred_link_returns_through_its_own_row` |
 
@@ -189,20 +222,25 @@ Prior art: `tests/test_measure_rule3.py` tests the real Chema, Hwang and Baba ca
 
 ### Rule 3 clause table
 
-Stage A also holds the rule 1, 2 and id merge clauses, because Ahmed placed them in ticket 1. MEASURED counts come from the design check or the cited line. 125 clauses: 60 real, 65 `synthetic`.
+Stage A also holds the rule 1, 2 and id merge clauses, because Ahmed placed them in ticket 1. MEASURED counts come from the design check or the cited line. 148 clauses: 64 real, 84 `synthetic`. A hand-made decision row on real data rows counts as `synthetic`, because only 1 real decision row exists.
 
 | Clause | Plan line | Ticket 1 stage | Test name | Real or `synthetic` |
 |---|---|---|---|---|
-| Tie-breaker matches are excluded from minutes and shots | 121 | A | `test_a_tie_breaker_match_is_excluded` | real: Spezia v Hellas Verona `e0449015`, 31 rows (T7:753) |
+| Tie-breaker matches are excluded from minutes | 121 | A | `test_a_tie_breaker_match_is_excluded_from_minutes` | real: Spezia v Hellas Verona `e0449015`, 31 rows (T7:753) |
+| Tie-breaker matches are excluded from shots | 121 | A | `test_a_synthetic_tie_breaker_match_is_excluded_from_shots` | synthetic: 0 real, no shot row on that date (T7:750) |
 | An Understat match links on same home club, same away club, same season | 122 | A | `test_a_match_links_on_home_away_and_season` | real: 12,604 matches (T7:902) |
+| The nearest FBref date wins when a pair has 2+ matches | 122 | A | `test_a_synthetic_nearest_fbref_date_wins` | synthetic: 0 real ordered pairs on 2+ matches (design check) |
 | `date_gap_days` is recorded on every linked row, and gaps over 1 day are listed | 122 | A | `test_a_date_gap_days_recorded_on_rescheduled_match` | real: Caen v Toulouse, 11 days (T7:904) |
 | Over 14 days is no link | 122 | A | `test_a_synthetic_gap_over_14_days_does_not_link` | synthetic: 0 real (design check, gap days) |
+| A gap of exactly 14 days links | 122 | A | `test_a_synthetic_gap_of_exactly_14_days_links` | synthetic: 0 real, largest gap is 11 days (design check, gap days) |
 | Two FBref matches at the same date gap: lowest match id wins, and the case is listed (D9) | 122 | A | `test_a_synthetic_equal_date_gap_takes_lowest_match_id` | synthetic: 0 real (design check, ordered pairs) |
 | A match with no FBref minutes drops its shot rows, counted per league-season | 122 | A | `test_a_match_without_fbref_minutes_drops_its_shots` | real: Atalanta v Fiorentina 2023/24, 20 rows (T7:923) |
 | Shot rows from 2014/15 to 2016/17 stay unchanged | 122 | A | `test_a_shots_before_pool_seasons_are_untouched` | real: any 2016/17 shot row (T7:781) |
 | The league comes from the file name, not the `league` column | T7:59 | A | `test_a_league_comes_from_the_file_name` | real: `La_liga` and `La liga` (T7:59) |
 | Two FBref ids merge when name, team and season match and their matches never overlap | 123 | A | `test_a_two_ids_merge_when_name_team_season_match` | real: Gabriel Strefezza ITA 2023/24 (design check) |
-| Ids whose matches overlap do not merge | 123 | A | `test_a_synthetic_overlapping_ids_do_not_merge` | synthetic: 0 real (design check, merge results) |
+| Every merge is listed | 123 | A | `test_a_every_merge_is_listed` | real: 3 merges (design check) |
+| The same name at a different team does not merge | 123 | A | `test_a_same_name_at_different_team_does_not_merge` | real: 22 name-seasons, Juanfran ESP 2017/18 (design check) |
+| Ids whose matches overlap do not merge, and the case is listed | 123 | A | `test_a_synthetic_overlapping_ids_do_not_merge_and_are_listed` | synthetic: 0 real (design check, merge results) |
 | A merged player keeps the id held in other seasons | Q7 | A | `test_a_merged_player_keeps_id_from_other_seasons` | real: Strefezza keeps `ac4a4508` (design check) |
 | If neither id is in another season, the id with more minutes survives | Q7 | A | `test_a_merged_player_keeps_id_with_more_minutes` | real: Abdoul Meité keeps `8eb68164` (design check) |
 | Same minutes: the id that sorts first survives, and the case is listed | Q7 | A | `test_a_synthetic_equal_minutes_keeps_id_that_sorts_first` | synthetic: 0 real (design check, merge results) |
@@ -212,7 +250,8 @@ Stage A also holds the rule 1, 2 and id merge clauses, because Ahmed placed them
 | The club comes from `h_a` and the linked match | 128 | B | `test_b_club_comes_from_h_a` | real: 224,328 joined rows (design check) |
 | `home_away` gives the side where `h_a` is empty | 128 | B | `test_b_club_comes_from_home_away_when_h_a_empty` | real: 90,745 joined rows (design check) |
 | Rosters never decide the club | 128 | B | `test_b_roster_does_not_decide_the_club` | real: 4 groups, Luis Suárez at Granada (T7:235) |
-| A shot row with no side stops the run | 128 | B | `test_b_synthetic_row_with_no_side_stops` | synthetic: 0 real (T7:437) |
+| A shot row with no side stops the run, naming the file and row (D30) | D30 | B | `test_b_synthetic_row_with_no_side_stops` | synthetic: 0 real (T7:437) |
+| A shot row with an unknown side value stops the run, naming the file and row (D30) | D30 | B | `test_b_synthetic_row_with_unknown_side_stops` | synthetic: 0 real (T7:437) |
 | Exact match on the name after `html.unescape` | 129 | B | `test_b_exact_matches_after_html_unescape` | real: 523 groups, Dara O'Shea (design check) |
 | 2+ exact roster matches do not link | 130 | B | `test_b_synthetic_two_exact_roster_matches_do_not_link` | synthetic: 0 real (design check) |
 | 2+ exact matches skip step 1 | 130 | B | `test_b_synthetic_two_exact_matches_skip_step_1` | synthetic: 0 real (design check) |
@@ -220,7 +259,8 @@ Stage A also holds the rule 1, 2 and id merge clauses, because Ahmed placed them
 | Step 1 ignores accents (NFKD) | 130 | B | `test_b_step_1_ignores_accents` | real: 15,172 groups (design check) |
 | Step 1 ignores punctuation | 130 | B | `test_b_step_1_ignores_punctuation` | real: 161 groups (design check) |
 | Step 1 folds ø ð đ ı ł æ þ | 130 | B | `test_b_step_1_folds_letters_nfkd_does_not_reduce` | real: all 7 letters, þ on 1 group (design check) |
-| Step 1 folds ß and œ | 130 | B | `test_b_synthetic_step_1_folds_sharp_s_and_oe` | synthetic: 0 real (design check) |
+| Step 1 folds ß | 130 | B | `test_b_step_1_folds_sharp_s` | real: Pascal Groß, among others; 0 of them need it to link (design check) |
+| Step 1 folds œ | 130 | B | `test_b_synthetic_step_1_folds_oe` | synthetic: 0 real, no name holds œ (design check) |
 | Step 1 counts a hyphen as a space | 130 | B | `test_b_step_1_counts_hyphen_as_space` | real: 1,269 groups (design check) |
 | 2+ roster matches at step 1 do not link | 130 | B | `test_b_synthetic_two_step_1_roster_matches_do_not_link` | synthetic: 0 real (design check) |
 | A shot name with 2+ roster matches after step 1 goes to step 2 | 131 | B | `test_b_synthetic_two_step_1_matches_go_to_step_2` | synthetic: 0 real (design check) |
@@ -256,6 +296,7 @@ Stage A also holds the rule 1, 2 and id merge clauses, because Ahmed placed them
 | The guard runs once per `name_match = map` player-season, after the merges | 132 | C | `test_c_guard_runs_once_per_name_map_player_season` | real: 1,118 player-seasons (design check) |
 | The limit is 90 minutes at low totals | 132 | C | `test_c_limit_is_90_minutes_at_low_totals` | real: André Anderson, limit 90 (T7:237) |
 | The limit is 10% of the larger total above that | 132 | C | `test_c_limit_is_10_percent_of_larger_total` | real: Ezzalzouli, limit 93.3 (T7:238) |
+| A gap exactly at the limit keeps the link | 132 | C | `test_c_synthetic_gap_at_the_limit_keeps_the_link` | synthetic: 0 real (design check) |
 | A link beyond the limit is removed and listed | 132 | C | `test_c_link_beyond_the_limit_is_removed_and_listed` | real: André Anderson (T7:237) |
 | The lookup tries the player-season's shot names | Q5 | C | `test_c_lookup_uses_shot_name` | real: 1,109 lookups (design check) |
 | The lookup tries every spelling of that player-season | Q5 | C | `test_c_lookup_uses_any_spelling_of_the_player_season` | real: Guirassy GER 2023/24 (design check) |
@@ -273,46 +314,61 @@ Stage A also holds the rule 1, 2 and id merge clauses, because Ahmed placed them
 | 95.5% does not set the flag | 137 | C | `test_c_no_partial_join_above_95_percent` | real: Marc Cardona, 21 of 22 (T7:249) |
 | Exactly 95% does not set the flag | 137 | C | `test_c_synthetic_exactly_95_percent_is_not_flagged` | synthetic: 0 real (design check) |
 | No rows joined sets the flag | 137 | C | `test_c_no_joined_rows_is_partial_join` | real: Ruslan Malinovskiy (T7:248) |
-| A Pool candidate with no joined shots is flagged | 137 | C | `test_c_pool_candidate_with_no_joined_shots_is_flagged` | real: 27 candidates (design check) |
-| A flagged Pool candidate stays out of the Pool | 137 | C | `test_c_flagged_pool_candidates_stay_out` | real: 28 candidates (design check) |
-| A two-id Pool candidate with different names is held (Q3) | Q3 | C | `test_c_synthetic_two_id_pool_candidate_is_held` | synthetic: 0 real (design check) |
+| A Pool candidate with no joined shots is flagged | 137 | C | `test_c_candidate_with_no_joined_shots_is_flagged` | real: 27 candidates (design check) |
+| A flagged Pool candidate stays out of the Pool | 137 | C | `test_c_flagged_candidates_stay_out` | real: 28 candidates (design check) |
+| A `partial_join` player-season outside the candidates is held, so its shot and per-90 metrics are not used | 137 | C | `test_c_partial_join_outside_the_candidates_is_held` | real: Jeffinho FRA 2022/23, 1 of 10, one of 4 such (design check) |
+| A two-id Pool candidate with different names is held (Q3) | Q3 | C | `test_c_synthetic_two_id_candidate_is_held` | synthetic: 0 real (design check) |
 | The reader reads the file's columns | 138 | D | `test_d_reader_reads_the_real_row` | real: row 1 of `review_decisions.csv` |
 | The reader accepts a byte order mark | T7:130 | D | `test_d_synthetic_reader_accepts_byte_order_mark` | synthetic: 0 real (the file has none) |
 | `name_map` key form, with the name after `html.unescape` | 139 | D | `test_d_name_map_key_form` | real: `ESP\|2023\|10095\|Abdessamad Ezzalzouli\|bed68338` |
 | `season_anchor` key form | 139 | D | `test_d_synthetic_season_anchor_key_form` | synthetic: 0 real rows |
 | `partial_join` key form | 140 | D | `test_d_synthetic_partial_join_key_form` | synthetic: 0 real rows |
-| `pool_candidate` key form, season is `Season_End_Year` minus 1 | 141 | D | `test_d_synthetic_pool_candidate_key_form` | synthetic: 0 real rows |
+| `player_season` key form, season is `Season_End_Year` minus 1 | 141 | D | `test_d_synthetic_player_season_key_form` | synthetic: 0 real rows |
+| `ITEM_TYPES` holds `player_season`, so `scripts/measure_rule3.py` accepts that row and a row with the old name stops | D35 | D | `test_d_synthetic_measure_rule3_accepts_a_player_season_row` | synthetic: 0 real rows (`data/standin/review_decisions.csv`) |
 | Decisions apply after rule 3 and change exactly the approved link's rows | 142 | D | `test_d_approve_runs_after_rule_3_and_changes_30_rows` | real: Ezzalzouli, 30 rows, 315,043 to 315,073 (design check) |
 | `approve` keeps a link the guard removed, flagged `minutes_check = approved`, and it stays in `name_map.csv` | 134, 142 | D | `test_d_approve_restores_guard_removed_link` | real: Ezzalzouli (`review_decisions.csv` row 1) |
+| `approve` on a `name_map` key does not approve a `season_anchor` key, and the reverse | T7:129 | D | `test_d_synthetic_approve_stays_on_its_own_link_type` | synthetic: 0 real rows |
 | `approve` clears a `partial_join` flag | 142 | D | `test_d_synthetic_approve_clears_partial_join` | synthetic: 0 real rows |
-| `approve` puts a `pool_candidate` back in the Pool | 142 | D | `test_d_synthetic_approve_returns_pool_candidate` | synthetic: 0 real rows |
+| `approve` puts a `player_season` back in the Pool | 142 | D | `test_d_synthetic_approve_returns_player_season` | synthetic: 0 real rows |
 | `reject` removes a link and leaves its rows unjoined | 142 | D | `test_d_synthetic_reject_removes_a_link` | synthetic: 0 real rows |
 | `reject` keeps a flag in place | 145 | D | `test_d_synthetic_reject_keeps_a_flag` | synthetic: 0 real rows |
 | `link_to` joins the item's rows to `fbref_id`, flagged `name_match = reviewed` | 142 | D | `test_d_synthetic_link_to_joins_rows` | synthetic: 0 real rows |
-| `pool_candidate` with `link_to` adds both ids' minutes, position rows and joined shots under `fbref_id` before any total | Q3 check 1 | D | `test_d_synthetic_link_to_pool_candidate_combines_records` | synthetic: 0 real rows |
-| That combination stops if the two ids share a match | Q3 check 1 | D | `test_d_synthetic_link_to_pool_candidate_stops_on_shared_match` | synthetic: 0 real rows |
+| `player_season` with `link_to` adds both ids' minutes, position rows and joined shots under `fbref_id` before any total | Q3 check 1 | D | `test_d_synthetic_link_to_player_season_combines_records` | synthetic: 0 real rows |
+| That combination stops if the two ids share a match | Q3 check 1 | D | `test_d_synthetic_link_to_player_season_stops_on_shared_match` | synthetic: 0 real rows |
 | A combined record that fails the Pool test stays out and is listed | Q3 check 1 | D | `test_d_synthetic_combined_record_failing_pool_test_stays_out` | synthetic: 0 real rows |
 | `merge_ids` does what `link_to` does, for two Understat ids on one FBref id | 142 | D | `test_d_synthetic_merge_ids_links_second_understat_id` | synthetic: 0 real rows |
+| Every `merge_ids` row is listed | 144 | D | `test_d_synthetic_merge_ids_row_is_listed` | synthetic: 0 real rows |
 | `approve` restores a stopped link (Q2) | Q2 | D | `test_d_synthetic_approve_restores_stopped_link` | synthetic: 0 real rows |
+| An approved stopped link that leaves 2 FBref ids also needs a `cross_season_ids` row, and the error says so | Q2 | D | `test_d_synthetic_approved_stopped_link_needs_a_cross_season_row` | synthetic: 0 real rows |
 | `reject` leaves a stopped link removed (Q2) | Q2 | D | `test_d_synthetic_reject_leaves_stopped_link_removed` | synthetic: 0 real rows |
 | `link_to` sends a stopped link's rows to the named id (Q2) | Q2 | D | `test_d_synthetic_link_to_redirects_stopped_link` | synthetic: 0 real rows |
 | Approving a stopped link does not lift the anchor bar | Q4 check 2 | D | `test_d_synthetic_approving_stopped_link_keeps_the_bar` | synthetic: 0 real rows |
 | A barred link comes back through its own `approve` or `link_to` row | Q4 check 2 | D | `test_d_synthetic_barred_link_returns_through_its_own_row` | synthetic: 0 real rows |
 | A key absent from rule 3's output stops as stale | 143 | D | `test_d_synthetic_stale_key_stops` | synthetic: 0 real rows |
 | A link the guard removed counts as an existing key | 143 | D | `test_d_guard_removed_link_is_not_stale` | real: Ezzalzouli |
+| A link the id collision rule removed counts as an existing key | 143 | D | `test_d_synthetic_collision_removed_link_is_not_stale` | synthetic: 0 real collisions after the guard (design check) |
+| A `player_season` key exists for any flagged candidate, and one row covers every flag on it | D31 | D | `test_d_synthetic_one_player_season_row_covers_every_flag` | synthetic: 0 real rows |
+| `link_to` on a `player_season` runs every check again on the combined record | D31 | D | `test_d_synthetic_link_to_player_season_reruns_every_check` | synthetic: 0 real rows |
+| A refused merge has a `player_season` key, also for a player outside the Pool | D31 | D | `test_d_synthetic_refused_merge_has_a_player_season_key` | synthetic: 0 real (design check, merge results) |
+| `link_to` on a refused merge combines the two ids | D31 | D | `test_d_synthetic_link_to_combines_a_refused_merge` | synthetic: 0 real |
+| `reject` on a refused merge keeps the ids apart and the case stays listed | D31 | D | `test_d_synthetic_reject_keeps_a_refused_merge_apart` | synthetic: 0 real |
+| A `partial_join` key exists for any player-season with an unjoined row, and `link_to` joins those rows | D32 | D | `test_d_synthetic_link_to_joins_an_unflagged_unjoined_row` | synthetic: 0 real rows, on Marc Cardona's real data (design check) |
+| A `partial_join` row on a player-season with no unjoined row stops as stale | D32 | D | `test_d_synthetic_partial_join_key_with_no_unjoined_row_is_stale` | synthetic: 0 real rows |
 | An unknown `item_type` stops | 143 | D | `test_d_synthetic_unknown_item_type_stops` | synthetic: 0 real rows |
 | An unknown `decision` stops | 143 | D | `test_d_synthetic_unknown_decision_stops` | synthetic: 0 real rows |
-| `link_to` or `merge_ids` with no `fbref_id` stops | 143 | D | `test_d_synthetic_link_to_without_fbref_id_stops` | synthetic: 0 real rows |
-| An `fbref_id` not in that league-season stops | 143 | D | `test_d_synthetic_fbref_id_outside_league_season_stops` | synthetic: 0 real rows |
+| `link_to` with no `fbref_id` stops | 143 | D | `test_d_synthetic_link_to_without_fbref_id_stops` | synthetic: 0 real rows |
+| `merge_ids` with no `fbref_id` stops | 143 | D | `test_d_synthetic_merge_ids_without_fbref_id_stops` | synthetic: 0 real rows |
+| `link_to` with an `fbref_id` not in that league-season stops | 143 | D | `test_d_synthetic_link_to_fbref_id_outside_league_season_stops` | synthetic: 0 real rows |
+| `merge_ids` with an `fbref_id` not in that league-season stops | 143 | D | `test_d_synthetic_merge_ids_fbref_id_outside_league_season_stops` | synthetic: 0 real rows |
 | An `fbref_id` on any other decision stops | 143 | D | `test_d_synthetic_fbref_id_on_other_decision_stops` | synthetic: 0 real rows |
-| `merge_ids` on a `pool_candidate` stops | 143 | D | `test_d_synthetic_merge_ids_on_pool_candidate_stops` | synthetic: 0 real rows |
+| `merge_ids` on a `player_season` stops | 143 | D | `test_d_synthetic_merge_ids_on_player_season_stops` | synthetic: 0 real rows |
 | `merge_ids` that puts no second Understat id on that FBref id stops | 143 | D | `test_d_synthetic_merge_ids_without_second_id_stops` | synthetic: 0 real rows |
 | Two rows on one key stop | 143 | D | `test_d_synthetic_two_rows_on_one_key_stop` | synthetic: 0 real rows |
-| A `pool_candidate` returning with no joined shots stops | 144 | D | `test_d_synthetic_pool_candidate_without_shots_stops` | synthetic: 0 real rows |
+| A `player_season` returning with no joined shots stops | 144 | D | `test_d_synthetic_player_season_without_shots_stops` | synthetic: 0 real rows |
 | Two Understat ids on one FBref id without `merge_ids` stop, naming both | 144 | D | `test_d_synthetic_two_understat_ids_without_merge_ids_stop` | synthetic: 0 real rows |
 | The result does not depend on row order | 144 | D | `test_d_synthetic_row_order_does_not_change_the_result` | synthetic: 0 real rows |
 | `partial_join` is worked out again after the decisions | 145 | D | `test_d_synthetic_partial_join_is_recomputed_after_decisions` | synthetic: 0 real rows |
-| The report shows the Pool count before and after the decisions | 146 | D | `test_d_pool_is_reported_before_and_after_decisions` | real: today's decisions file |
+| The join returns the Pool count before and after the decisions, for #21's report to print | 146 | D | `test_d_pool_count_is_returned_before_and_after_decisions` | real: today's decisions file |
 | An Understat id on 2+ FBref ids fails the run | Cross-season | D | `test_d_synthetic_two_fbref_ids_fail_the_run` | synthetic: 0 real with merges on (design check) |
 | A `cross_season_ids` row with `approve` allows it, and the case is listed | Cross-season | D | `test_d_synthetic_cross_season_row_allows_two_ids` | synthetic: 0 real rows |
 | Any other decision on `cross_season_ids` stops | Cross-season | D | `test_d_synthetic_cross_season_row_accepts_only_approve` | synthetic: 0 real rows |
@@ -323,7 +379,7 @@ Stage A also holds the rule 1, 2 and id merge clauses, because Ahmed placed them
 
 | Item | State | Owner |
 |---|---:|---|
-| Roger ESP 2023/24: totals 36, shot rows minus own goals 33, gap 3 | **Cause unknown.** Ruled out: a missing match, because both files hold all 380 matches and both Getafe v Cadiz games | Listed by #21, for Ahmed's review |
+| Roger ESP 2023/24: totals 36, shot rows minus own goals 33, gap 3 | **Cause unknown.** Ruled out: a missing match, because both files hold all 380 matches and both Getafe v Cadiz games (design check, ESP 2023/24 matches) | Listed by #21, for Ahmed's review |
 | David McGoldrick ENG 2020/21: totals 71, rows 70, gap 1 | **Cause unknown** | Listed by #21 |
 | Jaime Mata ESP 2023/24: totals 34, rows 33, gap 1 | **Cause unknown** | Listed by #21 |
 | Juan Latasa ESP 2023/24: totals 45, rows 44, gap 1 | **Cause unknown** | Listed by #21 |
@@ -344,6 +400,8 @@ No first-post ticket exists in #6. Plan line 113 blocks any post until #14, #15 
 
 **Season totals cannot be traced to source.** The Hugging Face dataset gives no scrape date or method (`docs/reports/HF_dataset_vetting.md:27`). No number from it is cleared to publish.
 
+**The guard.** Any publishing step fails unless the source says `may_publish`. See "The publishing guard".
+
 **Nothing in #6 becomes public.** The join, the records, the report, `name_map.csv` and every fixture stay in the private repo. FBref data stays private under plan:113.
 
 ## Out of Scope
@@ -361,27 +419,31 @@ No first-post ticket exists in #6. Plan line 113 blocks any post until #14, #15 
 |---|---|
 | :123 | No survivor rule, tie-breaker or cross-season check |
 | :126 | The 7 flips were measured before the merges. `NOT RUN` on merged ids: #21 proves it |
+| :128 | No stop for a shot row with no side or an unknown side (D30) |
 | :131 | "Left to the id merges" overstates the rule (Q3) |
 | :132 | The guard looks up the shot name as stored. It now uses the Q5 lookup |
 | :133 | Nothing bars a stopped player-season from anchors (Q4) |
 | :134 | Guirassy keeps `minutes_check = none`. MEASURED: he now reads `agree` |
 | :135 | `minutes_check = none` now has 0 real rows |
+| :137 | `held_for_review` also covers flagged player-seasons outside the candidates. The plan only keeps Pool candidates out |
 | :138 | `item_type` has no `cross_season_ids` |
-| :142 | `pool_candidate` with `link_to` does not say the records combine |
-| :143 | The stale rule does not name stopped links, barred links or `cross_season_ids` |
+| :138, :141-145 | They use the old name of the review key. It is now `player_season` (D35) |
+| :142 | `player_season` with `link_to` does not say the records combine |
+| :143 | The stale rule does not name stopped links, barred links, `cross_season_ids`, refused merges, or `partial_join` keys on unflagged player-seasons |
 | :148-152 | The 4 open questions are answered here |
+| :157 | Names `infrastructure/understat/` only. The spec adds `infrastructure/standin/` (D16) |
 | :159 | Q26 says all tests go through three seams. The join module is a fourth, by Ahmed's decision |
 | :163 | "No invented or hand-written fixture data" needs the `synthetic` exception, which stays out of `tests/fixtures/` |
 
 **Other items:**
+- `scripts/measure_rule3.py:39` still holds the old name of the review key. Stage D of #17 changes it. The function at `:325` is not the review key and keeps its name, and the design check below still calls it.
 - `docs/phase-1-plan.md` does not link this spec, because it is read-only in this session.
-- This spec is not committed, because this session was told not to commit. All 5 tickets cite it, so it must be committed before #17 starts.
 - `T7_trim.md:121` prints Strefezza's new candidate under `674cfc5a`. The survivor rule makes it `ac4a4508`.
 - #8 says it creates the `twin` layout. #6 now makes part of it.
 - #16 is not a sub-issue of #1 (`gh api repos/afarah101/football-twin/issues/1/sub_issues`).
 - The boxes in #6 are not ticked, because the `to-tickets` skill does not modify the parent.
 - `.gitignore` does not cover `__pycache__`. Stage A of #17 fixes it.
-- `scripts/measure_rule3.py:29` rewrites `docs/reports/name_map_sample.csv` on every run. #17 keeps that, with the frozen-pairs check in D12.
+- `scripts/measure_rule3.py:357` and `:597` rewrite `docs/reports/name_map_sample.csv` on every run. #17 keeps that, with the frozen-pairs check in D12.
 - System `python3` has no pandas. Every check uses `~/sandbox/parquet-vet/venv`.
 
 ## Further Notes
@@ -477,6 +539,30 @@ def run(pos, label, merged):
     if not merged: return
     u2f, f2u = defaultdict(set), defaultdict(set)
     for g, l in final.items(): u2f[g.understat_id].add(l[1]); f2u[l[1]].add(g.understat_id)
+    # Later findings: limit boundary, unflagged unjoined rows, who is held, equal minutes, same name at two teams
+    at_limit = 0
+    for p in sorted(set(mp.values())):
+        opts = [o for n in sorted(names_of[(p.league, p.season, p.understat_id)]) for o in um.get((p.league, p.season, n), [])] or [o for n in fb_names.get((p.league, p.season + 1, p.fbref_id), []) for o in um.get((p.league, p.season, html.unescape(n)), [])]
+        if len(opts) > 1: opts = [o for o in opts if o[0] & coc[(p.league, p.season + 1, p.fbref_id)]]
+        if len(opts) == 1: at_limit += abs(opts[0][1] - fm.get((p.league, p.season + 1, p.fbref_id), 0)) == m.minutes_limit(opts[0][1], fm.get((p.league, p.season + 1, p.fbref_id), 0))
+    counts = m.join_counts(rows_of, final)
+    unflagged = {k: v for k, v in counts.items() if v[0] < v[1] and k not in partial}
+    held = {(k[0], k[1] + 1, f) for k, v in partial.items() for f in ids_of[k]} | no_shots
+    print(f"guard gap exactly at the limit {at_limit} | unjoined rows on unflagged player-seasons {[(k, v, sorted(names_of[k])) for k, v in unflagged.items()]}")
+    print(f"PlayerSeasons held by a flag {len(held)}, of them Pool candidates {len(held & pset)}, outside the candidates {sorted(held - pset)}")
+    events = pd.concat([pd.read_parquet(m.DATA / f"{lg}_M_1st_match_summary.parquet", columns=["MatchURL", "Team", "Event_Type", "Event_Players"]) for lg in m.SHOT_FILE_OF_LEAGUE])
+    subs = events[events["Event_Type"] == "Substitute"].drop_duplicates(["MatchURL", "Team", "Event_Players"])
+    came_on = set(zip(subs["MatchURL"].str.extract(r"/matches/([0-9a-f]{8})/", expand=False), subs["Team"], subs["Event_Players"].str.split(" for ").str[0].str.strip()))
+    sub_row = pd.Series([key in came_on for key in zip(pos["match"], pos["Team"], pos["Player"])], index=pos.index)
+    att_row = pd.Series([bool(set(x.split(",")) & m.ATTACKING_POS) for x in pos["Pos"]], index=pos.index)
+    keys3 = ["league", "Season_End_Year", "fbref_id"]
+    tot = pd.DataFrame({"total": pos.groupby(keys3)["Min"].sum(), "att": pos[~sub_row & att_row].groupby(keys3)["Min"].sum(), "oth": pos[~sub_row & ~att_row].groupby(keys3)["Min"].sum()}).fillna(0)
+    print(f"900+ minutes with equal attacking and other minutes {[(k, int(r.att)) for k, r in tot[(tot.total >= 900) & (tot.att == tot.oth)].iterrows()]}")
+    same = pos.groupby(["league", "Season_End_Year", "Player"]).agg(ids=("fbref_id", "nunique"), teams=("Team", "nunique"))
+    print(f"same name on 2+ FBref ids at 2+ teams in a league-season {int(((same.ids > 1) & (same.teams > 1)).sum())}, for example {list(same[(same.ids > 1) & (same.teams > 1)].head(3).index)}")
+    raw_names = list(pos["Player"].unique()) + list(sh["player"].unique())
+    print(f"names holding ß anywhere {[n for n in raw_names if 'ß' in n][:12]} | holding œ {[n for n in raw_names if 'œ' in n.lower()][:12]}")
+    print(f"ESP 2023/24 matches: FBref {pos[(pos.league == 'ESP') & (pos.Season_End_Year == 2024)]['match'].nunique()}, shot file {sh[(sh.league == 'ESP') & (sh.season == 2023)]['match_id'].nunique()} | shot file Getafe v Cadiz games {sorted(sh[(sh.league == 'ESP') & (sh.season == 2023) & sh.home_team.isin(['Getafe', 'Cadiz']) & sh.away_team.isin(['Getafe', 'Cadiz'])]['date'].unique().tolist())} | FBref Getafe v Cádiz games {sorted(pos[(pos.league == 'ESP') & (pos.Season_End_Year == 2024) & pos.Home_Team.isin(['Getafe', 'Cádiz']) & pos.Away_Team.isin(['Getafe', 'Cádiz'])]['Match_Date'].unique().tolist())}")
     print(f"Understat ids on 2+ FBref ids {[u for u, v in u2f.items() if len(v) > 1]} | FBref ids on 2+ Understat ids {[f for f, v in f2u.items() if len(v) > 1]}")
     gap, nonzero = Counter(), []
     for k in pool:
@@ -495,6 +581,12 @@ def run(pos, label, merged):
         if len(found) > 1: found = [o for o in found if o[0] & coc[k]]; via += " + club"
         totals_routes[via if len(found) == 1 else "none"] += 1
     print(f"season totals routes {dict(sorted(totals_routes.items()))}")
+    held_totals = Counter()
+    for k in no_shots:
+        found = [o for x in fb_names[k] for o in hfi.get((k[0], k[1] - 1, html.unescape(x)), [])]
+        if len(found) > 1: found = [o for o in found if o[0] & coc[k]]
+        held_totals["one row" if len(found) == 1 else "no single row"] += 1
+    print(f"no-joined-shots candidates through the FBref name {dict(held_totals)}")
     print(f"shot gap {dict(sorted(gap.items(), key=str))} {nonzero}")
     # Real-case counts per clause
     c, letters = Counter(), Counter()
@@ -504,7 +596,7 @@ def run(pos, label, merged):
         c["exact 2+"] += len(ex) > 1; c["step 1 2+"] += not ex and len(same) > 1; c["exact via html.unescape"] += len(ex) == 1 and un != g.name
         if not ex and len(same) == 1:
             both = un + same[0].player
-            for ch in "øðđıłßæœþ": letters[ch] += ch in both.casefold()
+            for ch in "øðđıłßæœþ": letters[ch] += ch in both.lower()  # not casefold: it turns ß into ss
             c["step 1 hyphen"] += "-" in both
             c["step 1 punctuation"] += any(not (x.isalnum() or x.isspace() or x == "-" or unicodedata.combining(x)) for x in unicodedata.normalize("NFKD", both))
             c["step 1 accents"] += any(unicodedata.combining(x) for x in unicodedata.normalize("NFKD", both))
@@ -573,8 +665,15 @@ joined 315073 | before decisions 315043 | Pool 3109 of 3137 | no joined shots 27
 guard {'agree': 1116, 'disagree': 2} | routes {'FBref name': 6, 'shot name': 1109, 'shot name + club': 17} | anchors 105 groups 229 rows, guard {'agree': 14}, stopped {'no links for that club': 3, 'under 2 other matches': 1} | collisions {} | stopped player-seasons []
 step 2 stopped {'2+ candidates': 109, 'no candidate': 1289, 'player-seasons reaching 2+ FBref ids': 0} | name map kept 1117 | partial_join 149
 anchors that rest only on a guard-removed link: 0
+guard gap exactly at the limit 0 | unjoined rows on unflagged player-seasons [(('ESP', 2023, 5159), (21, 22), ['Marc Cardona'])]
+PlayerSeasons held by a flag 32, of them Pool candidates 28, outside the candidates [('ESP', 2020, '7f203b54'), ('ESP', 2024, 'a6103274'), ('FRA', 2023, '45cce300'), ('ITA', 2024, '39769cff')]
+900+ minutes with equal attacking and other minutes []
+same name on 2+ FBref ids at 2+ teams in a league-season 22, for example [('ESP', 2018, 'Juanfran'), ('ESP', 2018, 'Raúl García'), ('ESP', 2019, 'Juanfran')]
+names holding ß anywhere ['Pascal Groß', 'Stefan Kießling', 'Niko Gießelmann', 'Tim Dierßen', 'Christian Groß', 'Tom Krauß', 'Noah Weißhaupt', 'Connor Noß', 'Pascal Groß', 'Stefan Kießling', 'Niko Gießelmann', 'Christian Groß'] | holding œ []
+ESP 2023/24 matches: FBref 380, shot file 380 | shot file Getafe v Cadiz games ['2023-11-06 20:00:00', '2024-05-12 12:00:00'] | FBref Getafe v Cádiz games ['2023-11-06', '2024-05-12']
 Understat ids on 2+ FBref ids [] | FBref ids on 2+ Understat ids []
 season totals routes {'FBref name': 5, 'shot name': 3093, 'shot name + club': 12}
+no-joined-shots candidates through the FBref name {'no single row': 27}
 shot gap {0: 3105, 1: 4, 3: 1} [('ENG', 2021, ['David McGoldrick'], 1), ('ESP', 2024, ['Jaime Mata'], 1), ('ESP', 2024, ['Roger'], 3), ('ESP', 2024, ['Juan Latasa'], 1), ('ESP', 2024, ['Chris Ramos'], 1)]
 clauses {'exact 2+': 0, 'exact via html.unescape': 523, 'step 1 2+': 0, 'step 1 accents': 15172, 'step 1 case only': 915, 'step 1 hyphen': 1269, 'step 1 punctuation': 161, 'step 2 candidate already matched': 129, 'step 2 last name': 7359, 'step 2 letters inside a word, no whole-word match': 54, 'step 2 roster inside shot': 2995, 'step 2 same words, other order': 270, 'step 2 shot inside roster': 4300}
 fold letters {'ß': 0, 'æ': 123, 'ð': 286, 'ø': 214, 'þ': 1, 'đ': 162, 'ı': 233, 'ł': 178, 'œ': 0} | side from h_a or home_away on joined rows {'h_a': 224328, 'home_away': 90745} | name only on the other club 4
@@ -588,42 +687,138 @@ hash check: 18 files, not in MANIFEST []
 
 </details>
 
+### C1 check
+
+How the Q5 lookup treats the 27 Pool candidates with no joined shots. Read-only, on `data/standin/` at `ad7fddb`.
+
+<details><summary>Script</summary>
+
+```python
+"""Read-only: does the Q5 lookup reach a totals row for the Pool candidates with no joined shots? Count the D4 failure as worded and as scoped."""
+import contextlib, html, io, sys
+from collections import Counter, defaultdict
+sys.path.insert(0, "scripts")
+import measure_rule3 as m
+import pandas as pd
+raw, sh, clubs = m.load_positions(), m.load_shots(), m.understat_to_fbref_clubs()
+pos = raw.copy()
+for (lg, y, _, player), part in raw.groupby(["league", "Season_End_Year", "Team", "Player"]):
+    ids = sorted(part["fbref_id"].unique())
+    if len(ids) < 2: continue
+    ms = [set(part.loc[part["fbref_id"] == i, "match"]) for i in ids]
+    if sum(map(len, ms)) != len(set().union(*ms)): continue
+    other = [i for i in ids if ((raw["fbref_id"] == i) & ~((raw["league"] == lg) & (raw["Season_End_Year"] == y))).any()]
+    minutes = part.groupby("fbref_id")["Min"].sum()
+    keep = other[0] if other else sorted(ids, key=lambda i: (-minutes[i], i))[0]
+    pos.loc[(pos["league"] == lg) & (pos["Season_End_Year"] == y) & pos["fbref_id"].isin(ids), "fbref_id"] = keep
+links, _, _ = m.link_matches(sh, pos, clubs)
+rows_of, _ = m.shot_groups(sh, links, pos)
+groups, rosters = sorted(rows_of), m.build_rosters(pos)
+joined = m.join_by_name(groups, rosters)
+mapped, undecided, _, _ = m.name_map_links(groups, rosters, joined)
+after = {**joined, **{g: ("map", f) for g, f in mapped.items()}}
+anch, _ = m.season_anchor_links(undecided, after)
+final = {**after, **{g: ("season_anchor", f) for g, f in anch.items()}}
+with contextlib.redirect_stdout(io.StringIO()): pool = m.pool_candidates(pos)
+nm = defaultdict(set)
+for g, l in final.items(): nm[(g.league, g.season + 1, l[1])].add(html.unescape(g.name))
+fb = pos.groupby(["league", "Season_End_Year", "fbref_id"]).agg(names=("Player", lambda s: sorted(set(s))), cl=("Team", lambda s: set(s)))
+hfi = defaultdict(list)
+for r in pd.read_parquet(m.DATA / "understat_xg_data.parquet", columns=["player_name", "team", "league", "season"]).itertuples():
+    lg = "ENG" if r.league == "EPL" else r.league
+    hfi[(lg, int(r.season[:4]), html.unescape(r.player_name))].append(({clubs.get((lg, p.strip())) for p in r.team.split(",")}, r.team))
+tally = Counter(); rows = []
+for k in pool:
+    y = k[1] - 1; has_shots = k in nm
+    found = [o for x in nm.get(k, []) for o in hfi.get((k[0], y, x), [])]; via = "shot name"
+    if not found: found = [o for x in fb.loc[k, "names"] for o in hfi.get((k[0], y, html.unescape(x)), [])]; via = "FBref name"
+    if len(found) > 1: found = [o for o in found if o[0] & set(fb.loc[k, "cl"])]; via += " + club"
+    state = "one row" if len(found) == 1 else "no single row"
+    tally[("joined shots" if has_shots else "no joined shots", state)] += 1
+    if not has_shots: rows.append((k[0], f"{y}/{str(y + 1)[2:]}", k[2], fb.loc[k, "names"], sorted(fb.loc[k, "cl"]), state, via if len(found) == 1 else "", found[0][1] if len(found) == 1 else ""))
+print("all candidates", len(pool), dict(sorted(tally.items())))
+for r in sorted(rows, key=lambda r: (r[5], r[0], r[1])): print(r)
+```
+
+</details>
+
+<details><summary>Output</summary>
+
+```
+all candidates 3137 {('joined shots', 'one row'): 3110, ('no joined shots', 'no single row'): 27}
+('ENG', '2017/18', '189cee7b', ['Javier Hernández'], ['West Ham United'], 'no single row', '', '')
+('ENG', '2018/19', '189cee7b', ['Javier Hernández'], ['West Ham United'], 'no single row', '', '')
+('ENG', '2021/22', '71b47ab9', ['Cucho'], ['Watford'], 'no single row', '', '')
+('ESP', '2018/19', '71b47ab9', ['Cucho'], ['Huesca'], 'no single row', '', '')
+('ESP', '2019/20', '71b47ab9', ['Cucho'], ['Mallorca'], 'no single row', '', '')
+('ESP', '2020/21', '71b47ab9', ['Cucho'], ['Getafe'], 'no single row', '', '')
+('ESP', '2020/21', 'ae86d473', ['Marcos André'], ['Valladolid'], 'no single row', '', '')
+('ESP', '2021/22', '49dbab27', ['Isaac Palazón Camacho'], ['Rayo Vallecano'], 'no single row', '', '')
+('ESP', '2021/22', 'ae86d473', ['Marcos André'], ['Valencia'], 'no single row', '', '')
+('ESP', '2021/22', 'ce8039aa', ['Nico Ribaudo'], ['Espanyol'], 'no single row', '', '')
+('ESP', '2022/23', '49dbab27', ['Isaac Palazón Camacho'], ['Rayo Vallecano'], 'no single row', '', '')
+('ESP', '2022/23', '85bed4ee', ['Rodri'], ['Real Betis'], 'no single row', '', '')
+('ESP', '2022/23', 'ce8039aa', ['Nico Ribaudo'], ['Espanyol'], 'no single row', '', '')
+('ESP', '2023/24', '85bed4ee', ['Rodri'], ['Real Betis'], 'no single row', '', '')
+('ESP', '2023/24', 'be719093', ['Isaac Bernal'], ['Sevilla'], 'no single row', '', '')
+('ESP', '2023/24', 'f7e87032', ['Viktor Tsyhankov'], ['Girona'], 'no single row', '', '')
+('FRA', '2022/23', '48d5bd33', ['Ruslan Malinovskyi'], ['Marseille'], 'no single row', '', '')
+('FRA', '2023/24', 'f15f8b2b', ['Musa Al-Taamari'], ['Montpellier'], 'no single row', '', '')
+('GER', '2022/23', 'b684a484', ['Jordan Pefok'], ['Union Berlin'], 'no single row', '', '')
+('GER', '2022/23', 'de4cac2d', ['Silas Katompa'], ['Stuttgart'], 'no single row', '', '')
+('GER', '2023/24', 'b684a484', ['Jordan Pefok'], ['Mönchengladbach', 'Union Berlin'], 'no single row', '', '')
+('GER', '2023/24', 'de4cac2d', ['Silas Katompa'], ['Stuttgart'], 'no single row', '', '')
+('ITA', '2017/18', '80dbbd10', ['Simeon Nwankwo'], ['Crotone'], 'no single row', '', '')
+('ITA', '2019/20', '48d5bd33', ['Ruslan Malinovskyi'], ['Atalanta'], 'no single row', '', '')
+('ITA', '2020/21', '48d5bd33', ['Ruslan Malinovskyi'], ['Atalanta'], 'no single row', '', '')
+('ITA', '2020/21', '80dbbd10', ['Simeon Nwankwo'], ['Crotone'], 'no single row', '', '')
+('ITA', '2021/22', '48d5bd33', ['Ruslan Malinovskyi'], ['Atalanta'], 'no single row', '', '')
+```
+
+</details>
+
 ## Decision log
 
 Decisions Claude made alone, under Ahmed's standing rules.
 
 **Rule checks:** 1 way back, 2 one path, 3 no silent merge, 4 ties, 5 list do not hide, 6 run check, 7 tests, 8 no guessing.
 
-**Complexity count:** 1 new `item_type` (`cross_season_ids`, whose wiring Ahmed approved). 0 new columns. The limit that stops for Ahmed is 2 new row types, so it does not fire.
+**Complexity count:** 1 new `item_type` (`cross_season_ids`, whose wiring Ahmed approved). 0 new columns. `player_season` is a rename, not a new row type. The limit that stops for Ahmed is 2 new row types, so it does not fire.
 
 | ID | Decision | Rule checks | Evidence | Real cases today |
 |---|---|---|---|---:|
 | D1 | A wrong file is the list in "What counts as a wrong file". **New run-failing check. Why no existing route works:** a review row cannot vouch for a changed file, so the way back is restoring or re-trimming it | 1, 2, 5, 6, 7 | MEASURED: 18 hashed files, 0 differ from `MANIFEST.md` (design check). The loader reads 17 of them | 0 |
 | D2 | A header-only `review_decisions.csv` is valid. 0 bytes is a failure | 1, 2, 7 | MEASURED: today's file has a header and 1 row | 0 |
-| D3 | A shot gap over 3 uses the existing `pool_candidate` row. `approve` lets that one gap pass, without raising the limit, and the report lists it. `reject` holds the PlayerSeason. A row on a gap of 3 or less stops as stale. **New run-failing check, from Ahmed. Why no new row type:** the key and decisions already fit | 1, 2, 5, 6, 7 | MEASURED: 3,105 at 0, 4 at 1, 1 at 3, 0 over 3 (design check) | 0 over 3 |
-| D4 | Run-failing, by Ahmed's decision: if a Pool candidate has no single totals row, the run fails and names the player. A `pool_candidate` row with `reject` clears the failure and keeps the player held. `approve` stops, because 3 of 10 metrics would read as zero. Ahmed decided no row brings the player back in ("Yes, leave it"). **New run-failing check. Why no existing route works:** the hold alone could pass unnoticed, and the failure is what makes Ahmed review it. `reject` is the existing row, and the clearing rule is Claude's, so that the run is not stuck for good (rule 1). Tests: `test_synthetic_no_single_totals_row_fails_the_run_and_names_the_player`, `test_synthetic_pool_candidate_reject_clears_missing_totals_and_holds`, `test_synthetic_approve_on_candidate_without_totals_stops` | 1, 5, 6, 7, 8 | MEASURED: 0 of 3,110 (design check, season totals routes) | 0 |
+| D3 | A shot gap over 3 uses the existing `player_season` row. `approve` lets that one gap pass, without raising the limit, and the report lists it. `reject` holds the PlayerSeason. It applies only to a candidate no other flag holds. The row follows D31. **New run-failing check, from Ahmed. Why no new row type:** the key and decisions already fit. Tests in #19: `test_synthetic_shot_gap_over_3_fails_the_run`, `test_synthetic_shot_gap_on_held_candidate_does_not_fail`, `test_synthetic_player_season_approve_allows_a_gap`, `test_synthetic_player_season_reject_holds_a_gap`, `test_roger_gap_of_3_passes` | 1, 2, 5, 6, 7 | MEASURED: 3,105 at 0, 4 at 1, 1 at 3, 0 over 3, across the 3,110 with joined shots. The 27 with no joined shots reach no totals row, so they have no gap (design check) | 0 over 3 |
+| D4 | Run-failing, by Ahmed's decision: if a Pool candidate that no other flag holds has no single totals row, the run fails and names the player. A candidate another flag already holds is listed and does not fail. The check runs after the review decisions, so a row that clears the other flag and leaves no totals row fails the run. A `player_season` row with `reject` clears the failure and keeps the player held. `approve` stops, because 3 of 10 metrics would read as zero. Ahmed decided no row brings the player back in while no totals row exists ("Yes, leave it"). `link_to` changes the record, so the lookup runs again on it (D31). **New run-failing check. Why no existing route works:** the hold alone could pass unnoticed, and the failure is what makes Ahmed review it. `reject` is the existing row, and the clearing rule is Claude's, so that the run is not stuck for good (rule 1). Tests: `test_candidate_already_held_with_no_totals_row_does_not_fail` (real), `test_synthetic_no_single_totals_row_fails_the_run_and_names_the_player`, `test_synthetic_clearing_a_flag_with_no_totals_row_fails_the_run`, `test_synthetic_player_season_reject_clears_missing_totals_and_holds`, `test_synthetic_approve_on_candidate_without_totals_stops` | 1, 5, 6, 7, 8 | MEASURED: 3,110 candidates with joined shots have one row. All 27 with no joined shots have no single row, and all 27 are already flagged, so the failure count is 27 as first worded and 0 as scoped (C1 check) | 0 failing, 27 held |
 | D5 | `cross_season_ids` is the only new row type. **Why no existing route works:** the other item types key on one link or one FBref id, and `merge_ids` covers the opposite direction, two Understat ids on one FBref id | 1, 2, 3, 5, 6, 7 | MEASURED: 0 Understat ids on 2+ FBref ids (design check) | 0 |
 | D6 | A cross-season row is stale if the id holds fewer than 2 FBref ids after every decision | 1, 2, 7 | MEASURED: 0 such rows today | 0 |
 | D7 | `PlayerSeason.name` is the spelling with most minutes, and a tie goes alphabetically. The report lists every id with 2+ names | 2, 4, 5, 7 | MEASURED: 28 ids, 6 in the Pool (design check) | 28 |
 | D8 | Display label ties go alphabetically (plan:120), and the report lists them | 4, 5, 7 | MEASURED: 918 ties, 78 in the Pool (design check) | 918 |
-| D9 | Two FBref matches at one date gap: lowest match id wins, and the report lists the case | 2, 4, 5, 7 | MEASURED: 0 ordered pairs on 2+ matches (design check) | 0 |
-| D10 | Three record checks fail the run: record minutes differ from the FBref rows, two records on one key, a Shot with no PlayerSeason. **Why no existing route works:** each means a code fault, not a data case, so the way back is fixing the code | 1, 2, 6, 7 | MEASURED: 24,894,121 minutes before and after the merges, 19,062 keys (design check). `NOT RUN` on records: #19 proves it | 0 |
-| D11 | A PlayerSeason in the Pool with no totals fails the run. **Why no existing route works:** D4 already fails the run or holds such a player, so reaching the Pool means a code fault | 1, 2, 6, 7 | MEASURED: 0 (design check) | 0 |
+| D9 | Two FBref matches at one date gap: lowest match id wins, and the report lists the case. No row overrules it, because that would need a second new row type for a case with 0 real rows. If one appears, Ahmed decides then | 2, 4, 5, 7 | MEASURED: 0 ordered pairs on 2+ matches (design check) | 0 |
+| D10 | Three record checks fail the run, and each failure names the case: record minutes differ from the FBref rows, two records on one key, a Shot with no PlayerSeason. **Why no existing route works:** each means a code fault, not a data case, so the way back is fixing the code | 1, 2, 6, 7 | MEASURED: 24,894,121 minutes before and after the merges, 19,062 keys (design check). `NOT RUN` on records: #19 proves it | 0 |
+| D11 | A PlayerSeason in the Pool with no totals fails the run and names it. **Why no existing route works:** D4 already fails the run or holds such a player, so reaching the Pool means a code fault | 1, 2, 6, 7 | MEASURED: 0 (design check) | 0 |
 | D12 | Provisional. The run fails if the drawn sample pairs differ from the committed `docs/reports/name_map_sample.csv`. **Why no existing route works:** publishing check (b) rests on those 50 pairs, so a redraw needs Ahmed's approval in a commit. Stage C's check fails if more than the one Guirassy row changes | 1, 2, 5, 6 | MEASURED: the pairs match the committed file, and one committed row reads `none` (design check). `NOT RUN` that only that row changes: stage C of #17 proves it | 1 |
 | D13 | `name_map.csv` and `review_decisions.csv` stay outside the generated `MANIFEST.md` (T7:53). The first is a join output, and the second is Ahmed's input | 2, 5 | MEASURED: both absent from `MANIFEST.md` | 2 files |
 | D14 | Bamo Meïté gets no merge and no new row type | 3, 5, 8 | MEASURED: 1 shot row, 784 minutes together, under the 900 gate (T7:252-254) | 1 |
 | D15 | Five tickets, in this order: join, fixtures, records, wrong files, report. Ticket 1 goes first because Ahmed fixed it | 2 | MEASURED: blockers set on the issues | Not applicable |
-| D16 | Module and test paths as in "Layout" | 2 | Plan:157 | Not applicable |
+| D16 | Module and test paths as in "Layout". This is Claude's choice: plan:157 sets `twin/` with `domain/` and `infrastructure/understat/`, and names no stand-in folder or file, so `infrastructure/standin/` extends it by the same pattern | 2 | Plan:157 for `twin/` only | Not applicable |
 | D17 | `scripts/cut_fixtures.py` becomes the one path for all fixtures, reading `data/standin/`. `SOURCE_RELEASE`, `read_source` and `sha256_of` stay, because the trim imports them | 2, 7 | MEASURED: `scripts/trim_standin.py:21` | Not applicable |
 | D18 | One real sample folder, `loader_sample/`, serves the adapter seam, because the loader needs its file names | 2, 7 | `NOT RUN`: #18 proves it, with `test_loader_sample_holds_every_required_file` | Not applicable |
 | D19 | `unittest` stays as the runner | 2 | MEASURED: `requirements.txt` has no pytest, and `tests/test_measure_rule3.py:1` uses unittest | Not applicable |
 | D20 | The loader returns Pool seasons only | 2, 7 | MEASURED: 19,062 PlayerSeason keys (design check). `NOT RUN` on records: #19 proves it | 19,062 |
 | D21 | Merges-off mode exists only so the script can print the before-merge numbers. The cross-season check does not run there | 2, 7 | MEASURED: the run with merges off holds Strefezza's two ids (`T7:251`) | 2 ids |
 | D22 | One command writes the report, `docs/reports/T6_standin_loader.md`, so nothing is typed by hand | 2, 5, 6 | `NOT RUN`: #21 proves it, with the repeat check | Not applicable |
-| D23 | Provisional. The worst case for matches with no event rows is re-measured on merged ids. If it is not 7, #21 stops and reports it. It never changes the Pool (plan:126) | 5, 6, 8 | `NOT RUN`: #21 proves it. Plan:126 measured 7 before the merges | 7 before merges |
-| D24 | Provisional. The real count for "equal attacking and other minutes stays out" is not measured. The test uses a real case if one exists | 7, 8 | `NOT RUN`: #19 proves it | `NOT RUN` |
+| D23 | Provisional. The worst case for matches with no event rows is re-measured on merged ids. If it is not 7, #21 stops and reports it, and Ahmed sets the new expected number in that ticket. It never changes the Pool (plan:126) | 5, 6, 8 | `NOT RUN`: #21 proves it. Plan:126 measured 7 before the merges | 7 before merges |
+| D24 | "Equal attacking and other minutes stays out" has 0 real cases, so its test is `synthetic` | 7 | MEASURED: 0 at 900+ minutes (design check) | 0 |
 | D25 | The existing "no id collisions" check stays. Its route is a `merge_ids` row | 1, 2, 6 | MEASURED: 0 collisions (design check) | 0 |
 | D26 | `minutes_check = none` stays as a clause, now `synthetic`, because the guard's Q5 lookup leaves it 0 real cases | 1, 5, 7 | MEASURED: 0 `none` verdicts (design check) | 0 |
-| D27 | The 2+ candidates, stopped and barred lists print review keys, so every route can be used without reading code | 1, 5 | `NOT RUN`: #21 proves it | 109 groups |
+| D27 | The 2+ candidates, stopped and barred lists print review keys, so every route can be used without reading code. A 2+ candidate group prints its player-season's `partial_join` key (D32) | 1, 5 | `NOT RUN`: #21 proves it | 109 groups |
 | D28 | The old tests' real cases (Chema, Ángel, Hwang, Baba) move to `tests/test_player_join.py` | 2, 7 | MEASURED: 8 tests pass at `ad7fddb` | 4 cases |
 | D29 | The glossary terms go in #21, because this session's scope lock forbids `GLOSSARY.md` | 2, 5 | T7:53 | Not applicable |
+| D30 | A shot row with no side or an unknown side stops the run and names the file and row. **New run-failing check. Why no existing route works:** the row has no club, so no review row can place it. The way back is restoring the file or re-trimming | 1, 2, 5, 6, 7 | MEASURED: every shot row fills exactly one side (T7:437). `scripts/measure_rule3.py:143` holds the stop today | 0 |
+| D31 | One `player_season` row covers every flag on its key, and a key also exists for an id in a refused merge, including outside the Pool. `link_to` runs every check again. See "What a review key covers". **No new row type:** this widens the existing key, so the count stays at 1 | 1, 2, 3, 5, 7 | MEASURED: 0 refused merges (design check, merge results). 1 flagged candidate with joined shots, Dennis Johnsen | 0 refused |
+| D32 | A `partial_join` key exists for any player-season with an unjoined row, flagged or not. **No new row type:** this widens the existing key | 1, 2, 5, 7 | MEASURED: 1 unflagged player-season, Marc Cardona, 21 of 22 (design check) | 1 |
+| D33 | `held_for_review` is set on every flagged PlayerSeason, including 4 outside the candidates, and means no shot or per-90 metric may be used | 1, 5, 6, 7 | MEASURED: 32 held, 28 candidates, 4 outside (design check). `NOT RUN` on records: #19 proves it | 32 |
+| D34 | `may_publish` sits on the loader result and defaults to False. The stand-in never sets it. The live adapter sets it True only from a committed `docs/publishing_gate.csv` naming reviewer and date for every human gate check on #13. Any publishing step fails unless it is True, and names the source. **New run-failing check. Why no existing route works:** review rows act on players, so they must not be able to change what a source may do, and until now only written rules guarded this. The way back is the live adapter and the gate file, and the stand-in has none on purpose | 1, 2, 5, 6, 7 | `NOT RUN`: `test_standin_loader_may_publish_is_always_false` in #19 and the box on #13 prove it | 1 source |
+| D35 | The review key is `player_season`, because it also applies outside the Pool (D31). **No new row type:** it is the same row under a new name, so the count stays at 1. The plan and `scripts/measure_rule3.py:39` still hold the old name, and stage D of #17 changes the script | 2, 5, 7 | MEASURED: 0 rows of this type in `data/standin/review_decisions.csv`, so nothing needs migrating | 0 |
