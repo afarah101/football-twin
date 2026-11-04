@@ -71,7 +71,7 @@ EVENT_FILES = ("ENG_M_1st_match_summary.csv", "ESP_M_1st_match_summary.rds", "FR
 POSITION_KINDS = ("passing_types", "possession", "passing", "defense", "misc")
 NOT_STORED = {"ENG_M_1st_keeper_player_advanced_match_stats.rds": "No Pos column, and goalkeepers are out of scope."}
 
-SHOT_COLUMNS = ["id", "league", "season", "match_id", "date", "player", "player_id", "home_team", "away_team", "X", "Y", "xG", "situation", "shotType", "lastAction", "result"]
+SHOT_COLUMNS = ["id", "league", "season", "match_id", "date", "player", "player_id", "home_team", "away_team", "h_a", "home_away", "X", "Y", "xG", "situation", "shotType", "lastAction", "result"]
 POSITION_COLUMNS = ["MatchURL", "Match_Date", "Matchweek", "Season_End_Year", "Home_Team", "Away_Team", "Team", "Player", "Player_Href", "Pos", "Min"]
 EVENT_COLUMNS = ["MatchURL", "Match_Date", "Season_End_Year", "Team", "Event_Type", "Event_Players"]
 HF_TOTALS_COLUMNS = ["player_name", "team", "league", "season", "minutes", "goals", "assists", "shots", "key_passes", "xA", "npxG", "xGBuildup"]

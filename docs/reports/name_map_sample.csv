@@ -1,0 +1,51 @@
+league,understat_season,understat_id,shot_name,fbref_id,fbref_name,shot_rows,matches,understat_minutes,fbref_minutes,minutes_check
+ENG,2018,371,Sokratis,b682dcf6,Sokratis Papastathopoulos,11,10,2198,2198,agree
+ENG,2019,2203,Emiliano Buendía,66b76d44,Emi Buendía,40,23,2462,2464,agree
+ENG,2021,987,Joseph Gomez,7a11550b,Joe Gomez,1,1,333,331,agree
+ENG,2022,343,Pierre-Emile Højbjerg,8b04d6c1,Pierre Højbjerg,33,22,3137,3131,agree
+ENG,2022,8864,Matthew Cash,2389cdc2,Matty Cash,7,6,1822,1820,agree
+ESP,2017,2482,Tomás Pina,e54bd0a2,Tomás Pina Isla,13,12,2403,2387,agree
+ESP,2018,6942,Arthur,48b3dd60,Arthur Melo,6,5,1452,1430,agree
+ESP,2019,565,Nyom,97572117,Allan Nyom,13,11,2453,2422,agree
+ESP,2020,2305,Adrián,88a359d4,Adrián López,10,8,468,481,agree
+ESP,2020,4136,Ángel,8cfc2f69,Ángel Rodríguez,38,20,1350,1374,agree
+ESP,2021,2296,Mario,fb5d47b3,Mario Gaspar,4,3,617,623,agree
+ESP,2021,7338,Bryan Gil Salvatierra,7b5ab7f2,Bryan Gil,11,7,763,753,agree
+ESP,2022,2106,Munir,8696bc90,Munir El Haddadi,32,17,1126,1150,agree
+ESP,2022,2229,Yuri,b6e50615,Yuri Berchiche,28,17,2403,2406,agree
+ESP,2022,2396,Balenziaga,1fe67e86,Mikel Balenziaga,1,1,119,115,agree
+ESP,2022,6766,Dani Vivian,ab7bf91d,Daniel Vivian,13,11,2368,2376,agree
+ESP,2022,8978,Luis Suárez,eeba07f8,Luis Javier Suárez,39,16,1498,1490,agree
+ESP,2023,2260,Daniel Carvajal,4958bfb2,Dani Carvajal,18,16,2191,2171,agree
+ESP,2023,6592,Manuel Morlanes,a0255c67,Manu Morlanes,11,10,1607,1615,agree
+FRA,2018,5803,Fode Toure,f449640d,Fodé Ballo-Touré,9,8,3191,3187,agree
+FRA,2018,7240,Benoit Badiashile Mukinayi,06df8256,Benoît Badiashile,7,7,1763,1762,agree
+FRA,2020,2387,Danilo,0557ff4f,Danilo Barbosa,2,2,250,250,agree
+FRA,2020,3738,Sehrou Guirassy,923f4dda,Serhou Guirassy,52,21,,1764,none
+FRA,2020,6148,Michaël Cuisance,5722eced,Mickaël Cuisance,9,7,1018,1024,agree
+FRA,2020,7432,Reinildo,c20bdcd7,Reinildo Mandava,4,4,2181,2180,agree
+FRA,2021,8997,Terem Igobor Moffi,065dc209,Terem Moffi,61,29,2770,2711,agree
+FRA,2022,9658,Billal Brahimi,02bcaf8e,Bilal Brahimi,20,12,754,800,agree
+FRA,2022,11018,Jean Botué,65fcf987,Kouamé Botué,6,4,221,229,agree
+FRA,2023,7472,Wilfried Stephane Singo,8b609c34,Wilfried Singo,20,12,2183,2187,agree
+FRA,2023,8686,Cheick Tidiane Sabaly,9ddf7fae,Cheikh Tidiane Sabaly,21,14,1408,1379,agree
+FRA,2023,8997,Terem Igobor Moffi,065dc209,Terem Moffi,49,26,1985,1949,agree
+GER,2018,5309,Federico Palacios,434cf5b7,Federico Palacios Martínez,7,6,946,942,agree
+GER,2021,294,Gian-Luca Waldschmidt,e5a35ae9,Luca Waldschmidt,17,8,721,717,agree
+GER,2022,294,Gian-Luca Waldschmidt,e5a35ae9,Luca Waldschmidt,11,8,493,523,agree
+GER,2022,6626,Joshua Vagnoman,fb377d11,Josha Vagnoman,25,14,1471,1479,agree
+GER,2022,9427,Mehmet Can Aydin,fe46e261,Mehmet Aydin,5,3,542,567,agree
+ITA,2017,1141,Felipe,8cea6319,Felipe dal Belo,15,13,2577,2573,agree
+ITA,2019,7413,Ibañez,82efe6fa,Roger Ibanez,3,3,617,614,agree
+ITA,2019,7912,Eljif Elmas,cf007308,Elif Elmas,23,12,1110,1134,agree
+ITA,2019,7943,Igor Julio,a4e85758,Igor,5,5,1948,1948,agree
+ITA,2020,1210,Keita,509a4ccb,Keita Baldé,44,19,1194,1197,agree
+ITA,2020,1491,Alejandro Gomez,6e4df551,Papu Gómez,29,10,676,666,agree
+ITA,2020,7413,Ibañez,82efe6fa,Roger Ibanez,17,11,2405,2308,agree
+ITA,2021,2711,Aleksey Miranchuk,a9aa0d1d,Aleksei Miranchuk,15,10,764,772,agree
+ITA,2021,8034,Georgios Kyriakopoulos,0a483542,Giorgos Kyriakopoulos,30,19,1973,1975,agree
+ITA,2021,10034,Pablo Galdames,dd403465,Pablo Galdames Millán,12,7,1034,1028,agree
+ITA,2022,6872,Mehmet Zeki Çelik,31a62dc7,Zeki Çelik,5,5,1487,1504,agree
+ITA,2022,10377,Arthur Cabral,a820e429,Arthur,54,23,1415,1432,agree
+ITA,2022,10891,Carlos Augusto,8d3cd59d,Carlos,42,23,3094,3083,agree
+ITA,2023,10237,Leo Østigard,b35a7399,Leo Skiri Østigård,7,6,1611,1625,agree

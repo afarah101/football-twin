@@ -44,7 +44,7 @@ Run date: 2026-11-03. Issue: #7. Repo position at the first trim: `39b1c3a`, lev
 4. Majority `Pos`. The trim applies it, because `data/standin/` holds one `Pos` per row and #6 would have nothing to count. Each row records `Pos_Files_Voted` and `Pos_Tie`.
 5. #6 re-cuts `tests/fixtures/standin/` from `data/standin/`. Those fixtures still hold the original schema.
 
-**Open for Ahmed:** the club map review in section 9.
+**Open for Ahmed:** the club map review in section 9, the 50 pairs in `docs/reports/name_map_sample.csv`, and the 20 partly joined player-seasons under "Joining shots to players".
 
 ## Known limits, from the audit of `6666192`
 
@@ -62,27 +62,78 @@ Logged, not fixed. The numbers here come from that audit, not from output in thi
 
 ## Joining shots to players, measured for #6
 
-Measured on the current `data/standin/`, with the plan's rule, on the 317,385 Pool shot rows in linked matches. Measured before any FBref id merges, which the plan runs before the guard. These numbers come from an audit script that is not committed, so #6 re-measures them. `name_map.csv` does not exist yet, because #6 writes it.
+Measured on the current `data/standin/`, with the plan's rule, on the 317,385 Pool shot rows in linked matches. The club comes from `h_a` plus the linked match. `scripts/measure_rule3.py` prints these numbers, reading `data/standin/` only. The block below is an excerpt of its output. It measures before any FBref id merges, which #6 runs before the guard. `name_map.csv` does not exist yet, because #6 writes it.
 
-| Step | Rows joined | Rate |
+```
+$ python3 scripts/measure_rule3.py
+Pool shot rows in linked matches: 317385
+Exact: 262838 (82.81%)
+After step 1: 295066 (92.97%)
+After step 2: 314845 (99.20%)
+After the minutes guard: 314844 (99.20%)
+After id collisions: 314844 (99.20%)
+Unjoined: 2541
+ENG: exact 90.47 / step 1 97.19 / step 2 99.62 / final 99.62
+ESP: exact 80.38 / step 1 87.17 / step 2 98.35 / final 98.35
+FRA: exact 75.65 / step 1 88.83 / step 2 99.41 / final 99.41
+GER: exact 87.62 / step 1 95.81 / step 2 99.60 / final 99.60
+ITA: exact 80.01 / step 1 95.43 / step 2 99.06 / final 99.05
+Name map player-seasons 1118, rows 19779 | {'agree': 1109, 'approved': 1, 'disagree': 1, 'none': 7}
+Keep their link: 1117 player-seasons, 19778 rows
+Wrong same-club players who would pass the limit: 3104 of 32474 (9.6%)
+Collisions: 0
+Pool candidates with shots: 3109 of 3136 (99.14%)
+```
+
+- **Change from taking the club from rosters:** compared with the measurement in `03a9277`, which the script no longer reproduces, joined rows go from 314,630 to 314,844, and id collisions from 3 to 0. Luis Suárez ESP 2021/22, Raúl García ESP 2023/24 and Danilo ITA 2019/20 no longer collide.
+- **`h_a` against the rosters, the outside check:** in only 4 shot groups (6 rows) is the name on the other club's roster and not on the `h_a` club's. All 4 are those former collisions, where FBref's name differs from the shot's: Luis Suárez at Granada (2 groups), Raul García at Osasuna and Danilo at Bologna. In these, `h_a` is right and the roster reading was wrong.
+- **Minutes guard:** the limit is the larger of 90 minutes or 10%.
+  - **Not linked, 1:** André Anderson to Djavan Anderson, ITA 2019/20 (49 v 167, 1 row), a false link.
+  - **Approved by Ahmed, 1:** Abdessamad Ezzalzouli to Abde Ezzalzouli, ESP 2023/24 (839 v 933, gap 94, limit 93.3, 30 rows).
+  - **`minutes_check = none`, 7:** all Sehrou Guirassy, whom the season file spells Serhou, on 298 rows.
+  - **What the guard cannot catch:** tried against every other same-club player, 9.6% of wrong pairs still pass the limit. It is a filter, not proof.
+- **Sample for Ahmed's check:** `docs/reports/name_map_sample.csv` holds 50 of the 1,117 pairs, drawn with a fixed seed. Pairs are drawn equally, so a pair with 1 shot row counts as much as one with 61.
+- **Partly joined player-seasons, open:** 20 player-seasons hold both joined and unjoined rows, with 255 rows unjoined: 231 with 2+ candidates and 24 with no candidate, so the rule does not link. Their shot totals run short. The largest are Mama Baldé FRA 2022/23 (28 joined, 47 not), Kike García ESP 2017/18 (33, 37), 2022/23 (9, 33) and 2021/22 (24, 30), and Raul García ESP 2023/24 (5, 28). The rule does not settle these.
+- **One Understat id on 2+ FBref ids:** Joseph N'Duquidi FRA 2023/24 and Gabriel Strefezza ITA 2023/24. These are the known two-id players that the plan's id merge handles.
+- **Still unjoined:** 2,541 rows. The largest are Ruslan Malinovskiy (261 rows in ITA), Isi Palazón (224), Juan Camilo Hernández (153), Simy (128) and Kike García (119). 27 Pool candidates have no shots, for example Javier Hernández ("Chicharito"), Cucho and Silas Katompa.
+- **Named cases:** Raúl García 5114 to `1a317a1b`; Bruno 2302 to Bruno Soriano `09332647`; Ousmane Camara 11016 to `7d3dfdfd` and 11249 to `5a6b06cd`; Luis Suárez 2098 to `a6154613` and 8978 to Luis Javier Suárez `eeba07f8`; Danilo 2244 to `94b2001f` and 1140 to Danilo Larangeira `fed5f993`.
+
+## Re-trim with `h_a` and `home_away`, 2026-11-04
+
+The 5 shot files now keep `h_a` and `home_away`, so they hold 18 columns, not 16. Sections 1, 2, 3 and 5 and the appendix's full output show the earlier run. Where they differ, the numbers here and `MANIFEST.md` are current. The 5 shot files and `MANIFEST.md` changed, and the 13 other output files are byte-identical to the last commit.
+
+Run A wrote to one scratch folder and run B, with `PYTHONHASHSEED=12345`, to another. Both used the sandbox venv with network access denied, and neither used the fresh venv from section 5. Both exited 0. Run A was then copied into `data/standin/`, and all 19 files there equal run B's byte for byte.
+
+```
+bundesliga_shot_data.parquet	88214	18	1472562
+epl_shot_data.parquet	107838	18	1795242
+la_liga_shot_data.parquet	100188	18	1676484
+ligue_1_shot_data.parquet	96140	18	1619184
+serie_a_shot_data.parquet	110026	18	1834366
+```
+
+**#7 checks, re-run.** `t7_verify.py` from the appendix, unchanged, still shares no code with the script and reads the originals with `pyreadr`. Against its earlier output, only the shot files' column and cell counts and the shot column list differ.
+
+```
+bundesliga_shot_data: source rows 88214 trimmed rows 88214 columns 18 cells 1587852 differences 0
+epl_shot_data: source rows 107838 trimmed rows 107838 columns 18 cells 1941084 differences 0
+la_liga_shot_data: source rows 100188 trimmed rows 100188 columns 18 cells 1803384 differences 0
+ligue_1_shot_data: source rows 96140 trimmed rows 96140 columns 18 cells 1730520 differences 0
+serie_a_shot_data: source rows 110026 trimmed rows 110026 columns 18 cells 1980468 differences 0
+plain-file cells compared 10797406 differences 0
+```
+
+A separate check found all 18 trimmed files' hashes in `MANIFEST.md`, no file over 100 MB, and the old 16 shot columns equal to the last commit in all 5 shot files.
+
+**The two columns.** Every shot row in all seasons fills exactly one of them, with `h` or `a`. No row fills both or neither.
+
+| File | `h_a` filled | `home_away` filled |
 |---|---:|---:|
-| Exact | 262,843 | 82.82% |
-| After step 1 | 295,072 | 92.97% |
-| After step 2 | 314,837 | 99.20% |
-| After the minutes guard | 314,806 | 99.19% |
-| After leaving id collisions unjoined | 314,630 | 99.13% |
-
-- **By league, exact / step 1 / step 2 / final:** ENG 90.47 / 97.19 / 99.62 / 99.62; ESP 80.38 / 87.17 / 98.35 / 98.05; FRA 75.65 / 88.83 / 99.41 / 99.41; GER 87.62 / 95.81 / 99.60 / 99.60; ITA 80.01 / 95.43 / 99.05 / 99.02.
-- **Name map size:** 1,118 player-seasons and 19,765 rows reach the guard. 1,116 player-seasons and 19,734 rows keep their link.
-- **Minutes guard:** Understat season minutes (HF) against FBref minutes of the mapped id, limit the larger of 90 minutes or 10%. 1,109 agree, 2 disagree and 7 have no HF row.
-  - **The 2 not linked:** André Anderson to Djavan Anderson, ITA 2019/20 (49 v 167, 1 row), a false link; and Abdessamad Ezzalzouli to Abde Ezzalzouli, ESP 2023/24 (839 v 933, 30 rows).
-  - **Near-miss, for Ahmed's review:** Ezzalzouli's gap of 94 is just over the limit of 93.3. It looks like the right player: FBref spells the name both ways that season, and the other 8 shot rows join the same FBref id by exact name. Until reviewed, the season shot totals are 30 rows short.
-  - **No HF row:** the 7 are all Sehrou Guirassy, whom HF spells Serhou, on 298 rows. The links stay, flagged `minutes_check = none`.
-  - **What the guard cannot catch:** tried against every other same-club player, 3,104 of 32,474 wrong pairs (9.6%) still pass the limit. It is a filter, not proof, so the `name_map.csv` review still matters.
-- **Club check:** scored against `h_a` and `home_away` in the originals, 6 joined rows sit on the wrong club after step 2 and after the guard, and 0 after the id collision rule.
-- **Id collisions, 3, 176 rows left unjoined:** Luis Suárez ESP 2021/22, Raúl García ESP 2023/24 and Danilo ITA 2019/20. With the `h_a` values in the originals none of the 3 occurs, and 314,843 rows join, but using them needs a re-trim. Both Luis Suárez PlayerSeasons in 2021/22 lose all their shots.
-- **Still unjoined:** 2,755 rows. Pool candidates with shots: 3,106 of 3,136 (99.04%). The largest are Ruslan Malinovskiy (261 rows in ITA), Isi Palazón (224), Juan Camilo Hernández (153), Luis Suárez (140) and Simy (128).
-- **Named cases:** Raúl García 5114 to `1a317a1b`; Bruno 2302 to Bruno Soriano `09332647`; Ousmane Camara 11016 to `7d3dfdfd` and 11249 to `5a6b06cd`.
+| `bundesliga_shot_data` | 63,235 | 24,979 |
+| `epl_shot_data` | 76,878 | 30,960 |
+| `la_liga_shot_data` | 71,450 | 28,738 |
+| `ligue_1_shot_data` | 70,416 | 25,724 |
+| `serie_a_shot_data` | 80,802 | 29,224 |
 
 ## Step 0
 
@@ -100,7 +151,7 @@ b81c51f docs: make the stand-in site private and re-validate on live data
 aeb7168 docs: record box constants and keep FBref data private
 ```
 
-Re-trim start: `8c93206`, then 2 commits ahead of origin. `6666192` is 5 ahead and the commit adding the rule 3 measurements is 6 ahead, with nothing pushed.
+Re-trim start: `8c93206`, then 2 commits ahead of origin. `6666192` is 5 ahead, `03a9277`, which adds the rule 3 measurements, is 6 ahead, and the `h_a` re-trim commit is 7 ahead, with nothing pushed.
 
 Read first: `gh issue view 7`, `gh issue view 6`, `docs/phase-1-plan.md`, `docs/reports/T3_step0_facts.md`, `scripts/cut_fixtures.py`.
 
@@ -158,8 +209,9 @@ Not stored: `ENG_M_1st_keeper_player_advanced_match_stats.rds`. It has no `Pos` 
 
 | Source | Kept | Why | Dropped |
 |---|---|---|---|
-| Shot files, 5 | `id`, `league`, `season`, `match_id`, `date`, `player`, `player_id` | Identity, league-season, names are not unique | `minute`, `h_a`, `home_away`, `home_goals`, `away_goals`, `player_assisted`. No planned metric uses `minute`, so section 11 reads it from the original. |
+| Shot files, 5 | `id`, `league`, `season`, `match_id`, `date`, `player`, `player_id` | Identity, league-season, names are not unique | `minute`, `home_goals`, `away_goals`, `player_assisted`. No planned metric uses `minute`, so section 11 reads it from the original. |
 | | `home_team`, `away_team` | Rule 2 links shots to FBref matches, and the club map | |
+| | `h_a`, `home_away` | Added by the `h_a` re-trim: rule 3 takes the club from the side | |
 | | `X`, `Y` | Box shares, Q16 | |
 | | `xG` | npxG per shot | |
 | | `situation`, `shotType`, `lastAction`, `result` | Metrics, Q15, npg | |

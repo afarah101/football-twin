@@ -1,0 +1,431 @@
+"""Measure rule 3 of docs/phase-1-plan.md, joining shots to FBref players, on data/standin.
+
+Usage: python3 scripts/measure_rule3.py
+
+Prints the join table, the minutes guard results and the id collisions, with the checks behind them. Writes a fixed
+random sample of the name map to docs/reports/name_map_sample.csv. Reads data/standin only, makes no network calls, and
+the same files give identical output. Exits non-zero if a check at the end fails. Measured before any FBref id merges,
+because #6 owns those. The plan runs the guard after them.
+"""
+import csv
+import html
+import random
+import re
+import unicodedata
+from collections import Counter, defaultdict
+from datetime import date
+from pathlib import Path
+from typing import NamedTuple
+
+import pandas as pd
+
+ROOT = Path(__file__).resolve().parent.parent
+DATA = ROOT / "data" / "standin"
+SAMPLE_FILE = ROOT / "docs" / "reports" / "name_map_sample.csv"
+SAMPLE_SEED = 20261104
+SAMPLE_SIZE = 50
+
+SHOT_FILE_OF_LEAGUE = {"ENG": "epl", "ESP": "la_liga", "FRA": "ligue_1", "GER": "bundesliga", "ITA": "serie_a"}
+POOL_FIRST_SEASON, POOL_LAST_SEASON = 2017, 2023
+MAX_LINK_GAP_DAYS = 14
+FOLDED_LETTERS = str.maketrans({"ø": "o", "ð": "d", "đ": "dj", "ı": "i", "ł": "l", "ß": "ss", "æ": "ae", "œ": "oe", "þ": "th"})
+ATTACKING_POS = {"FW", "LW", "RW", "AM"}
+# Approved by Ahmed: FBref uses both spellings that season, and the other 8 shot rows join the same id by exact name.
+APPROVED_LINKS = {("ESP", 2023, 10095, "Abdessamad Ezzalzouli", "bed68338")}
+# League, Understat season and player_id of the cases the plan asks about, and the former collisions.
+NAMED_CASES = (
+    ("ESP", 2018, 5114), ("ESP", 2019, 2302), ("FRA", 2022, 11016), ("FRA", 2022, 11249),
+    ("ESP", 2021, 2098), ("ESP", 2021, 8978), ("ESP", 2023, 2400), ("ESP", 2023, 8042), ("ITA", 2019, 1140), ("ITA", 2019, 2244),
+)
+MIN_JOINED_ROWS = 314_843
+
+
+class ShotGroup(NamedTuple):
+    """One player's shots in one match, as Understat names them. The club comes from h_a and the linked match."""
+    league: str
+    season: int
+    match: str
+    understat_id: int
+    name: str
+    club: str
+
+    @property
+    def player_season_name(self):
+        return self.league, self.season, self.understat_id, self.name
+
+
+class RosterPlayer(NamedTuple):
+    fbref_id: str
+    player: str
+    compared: str
+
+
+class PlayerSeasonName(NamedTuple):
+    league: str
+    season: int
+    understat_id: int
+    name: str
+    fbref_id: str
+
+
+def compared_name(name):
+    """Step 1: case, accents and punctuation removed, letters NFKD does not reduce folded, a hyphen counts as a space."""
+    decomposed = unicodedata.normalize("NFKD", html.unescape(name))
+    folded = "".join(c for c in decomposed if not unicodedata.combining(c)).casefold().translate(FOLDED_LETTERS)
+    return " ".join(re.sub(r"[^\w\s]", "", folded.replace("-", " ")).split())
+
+
+def minutes_limit(understat_minutes, fbref_minutes):
+    return max(90, 0.1 * max(understat_minutes, fbref_minutes))
+
+
+def is_name_map_candidate(shot_words, roster_words):
+    """Step 2: shares the last name, or one name holds the other as whole words."""
+    return roster_words[-1] == shot_words[-1] or set(shot_words) <= set(roster_words) or set(roster_words) <= set(shot_words)
+
+
+def load_positions():
+    frames = []
+    for league in SHOT_FILE_OF_LEAGUE:
+        columns = ["MatchURL", "Match_Date", "Matchweek", "Season_End_Year", "Home_Team", "Away_Team", "Team", "Player", "Player_Href", "Pos", "Min"]
+        frames.append(pd.read_parquet(DATA / f"{league}_M_1st_positions.parquet", columns=columns).assign(league=league))
+    rows = pd.concat(frames, ignore_index=True)
+    rows = rows[rows["Season_End_Year"].between(POOL_FIRST_SEASON + 1, POOL_LAST_SEASON + 1) & ~rows["Matchweek"].str.contains("tie-breaker")].copy()
+    rows["match"] = rows["MatchURL"].str.extract(r"/matches/([0-9a-f]{8})/", expand=False)
+    rows["fbref_id"] = rows["Player_Href"].str.extract(r"/players/([0-9a-f]{8})/", expand=False)
+    return rows
+
+
+def load_shots():
+    frames = []
+    for league, stem in SHOT_FILE_OF_LEAGUE.items():
+        columns = ["season", "match_id", "date", "player", "player_id", "home_team", "away_team", "h_a", "home_away", "result"]
+        frames.append(pd.read_parquet(DATA / f"{stem}_shot_data.parquet", columns=columns).assign(league=league))
+    rows = pd.concat(frames, ignore_index=True)
+    rows = rows[rows["season"].between(POOL_FIRST_SEASON, POOL_LAST_SEASON)].copy()
+    rows["season"] = rows["season"].astype(int)
+    rows["player_id"] = rows["player_id"].astype(int)
+    # Every row fills exactly one of the two columns: main prints the check.
+    rows["side"] = rows["h_a"].where(rows["h_a"].fillna("") != "", rows["home_away"])
+    if not set(rows["side"].fillna("")) <= {"h", "a"}:
+        raise SystemExit("a Pool shot row has no side, or an unknown one")
+    return rows
+
+
+def understat_to_fbref_clubs():
+    club_map = pd.read_csv(DATA / "club_map.csv", keep_default_na=False)
+    return {(row.league, row.understat_club): row.fbref_club for row in club_map.itertuples() if row.understat_club and row.fbref_club}
+
+
+def link_matches(shots, positions, clubs):
+    """Rule 2: same home club and same away club, in that order, same season, nearest FBref date, at most 14 days."""
+    fbref_matches = positions.drop_duplicates("match")
+    by_pair = defaultdict(list)
+    for row in fbref_matches.itertuples():
+        by_pair[(row.league, row.Season_End_Year, row.Home_Team, row.Away_Team)].append((date.fromisoformat(row.Match_Date[:10]), row.match))
+    links, gaps = {}, Counter()
+    understat_matches = shots.drop_duplicates(["league", "match_id"])
+    for row in understat_matches.itertuples():
+        pair = (row.league, row.season + 1, clubs.get((row.league, row.home_team)), clubs.get((row.league, row.away_team)))
+        day = date.fromisoformat(row.date[:10])
+        options = sorted((abs((match_day - day).days), match) for match_day, match in by_pair.get(pair, []))
+        if options and options[0][0] <= MAX_LINK_GAP_DAYS:
+            links[(row.league, row.match_id)] = options[0][1]
+            gaps[options[0][0]] += 1
+    return links, gaps, len(understat_matches)
+
+
+def shot_groups(shots, links, positions):
+    """Rows per ShotGroup, in linked matches only. Also returns each linked shot row's group."""
+    fbref_matches = positions.drop_duplicates("match").set_index("match")
+    home, away = fbref_matches["Home_Team"].to_dict(), fbref_matches["Away_Team"].to_dict()
+    rows, keys = Counter(), []
+    for league, season, match_id, name, understat_id, side in zip(shots["league"], shots["season"], shots["match_id"], shots["player"], shots["player_id"], shots["side"]):
+        match = links.get((league, match_id))
+        if match is None:
+            keys.append(None)
+            continue
+        group = ShotGroup(league, season, match, understat_id, name, home[match] if side == "h" else away[match])
+        rows[group] += 1
+        keys.append(group)
+    return rows, keys
+
+
+def build_rosters(positions):
+    rosters = defaultdict(list)
+    for match, club, fbref_id, player in zip(positions["match"], positions["Team"], positions["fbref_id"], positions["Player"]):
+        rosters[(match, club)].append(RosterPlayer(fbref_id, player, compared_name(player)))
+    return rosters
+
+
+def join_by_name(groups, rosters):
+    """Exact, then step 1. Two players matching inside one club and match decides nothing, so that group stays unjoined."""
+    joined = {}
+    for group in groups:
+        roster = rosters[(group.match, group.club)]
+        exact = [player for player in roster if player.player == html.unescape(group.name)]
+        same = [player for player in roster if player.compared == compared_name(group.name)]
+        if len(exact) == 1:
+            joined[group] = ("exact", exact[0].fbref_id)
+        elif not exact and len(same) == 1:
+            joined[group] = ("step 1", same[0].fbref_id)
+    return joined
+
+
+def name_map_links(groups, rosters, joined):
+    """Step 2, within the match and club only. Returns the links and how many cases each rule stopped."""
+    taken = {(group.match, joined[group][1]) for group in joined}
+    claims, stopped = defaultdict(list), Counter()
+    for group in groups:
+        if group in joined:
+            continue
+        shot_words = compared_name(group.name).split()
+        options = [player for player in rosters[(group.match, group.club)] if (group.match, player.fbref_id) not in taken and player.compared and shot_words and is_name_map_candidate(shot_words, player.compared.split())]
+        if len(options) == 1:
+            claims[(group.match, options[0].fbref_id)].append(group)
+        else:
+            stopped["no candidate" if not options else "2+ candidates"] += 1
+    links = {}
+    for (_, fbref_id), claimants in claims.items():
+        if len(claimants) > 1:
+            stopped["two shot names on one roster player"] += len(claimants)
+        else:
+            links[claimants[0]] = fbref_id
+    ids_of_name = defaultdict(set)
+    for group, fbref_id in links.items():
+        ids_of_name[group.player_season_name].add(fbref_id)
+    conflicts = sorted(key for key, ids in ids_of_name.items() if len(ids) > 1)
+    stopped["player-seasons reaching 2+ FBref ids"] = len(conflicts)
+    return {group: fbref_id for group, fbref_id in links.items() if group.player_season_name not in conflicts}, stopped, conflicts
+
+
+def season_minutes_by_name(clubs):
+    """Understat season minutes per league, season and name, with the FBref clubs of each row's team list."""
+    rows = pd.read_parquet(DATA / "understat_xg_data.parquet", columns=["player_name", "team", "league", "season", "minutes"])
+    index = defaultdict(list)
+    for league, season, name, team, minutes in zip(rows["league"], rows["season"], rows["player_name"], rows["team"], rows["minutes"]):
+        league = "ENG" if league == "EPL" else league
+        index[(league, int(season[:4]), html.unescape(name))].append(({clubs.get((league, part.strip())) for part in team.split(",")}, int(minutes)))
+    return index
+
+
+def minutes_guard(name_map_rows, understat_minutes, fbref_minutes, clubs_of_player):
+    """One verdict per name map player-season: agree, disagree, approved or none."""
+    results = {}
+    for pair in sorted(name_map_rows):
+        options = understat_minutes.get((pair.league, pair.season, html.unescape(pair.name)), [])
+        if len(options) > 1:
+            options = [option for option in options if option[0] & clubs_of_player[(pair.league, pair.season + 1, pair.fbref_id)]]
+        fbref = fbref_minutes.get((pair.league, pair.season + 1, pair.fbref_id), 0)
+        if not options:
+            results[pair] = ("none", None, fbref)
+            continue
+        understat = sum(option[1] for option in options)
+        within = abs(understat - fbref) <= minutes_limit(understat, fbref)
+        results[pair] = ("agree" if within else "approved" if pair in APPROVED_LINKS else "disagree", understat, fbref)
+    return results
+
+
+def id_collisions(joined):
+    """Two Understat ids on one FBref id in a league-season."""
+    ids = defaultdict(set)
+    for group, (_, fbref_id) in joined.items():
+        ids[(group.league, group.season, fbref_id)].add(group.understat_id)
+    return {key: sorted(found) for key, found in sorted(ids.items()) if len(found) > 1}
+
+
+def pool_candidates(positions):
+    """PlayerSeasons at 900+ minutes with attacking minutes above other minutes, substitute appearances ignored."""
+    events = pd.concat([pd.read_parquet(DATA / f"{league}_M_1st_match_summary.parquet", columns=["MatchURL", "Team", "Event_Type", "Event_Players"]) for league in SHOT_FILE_OF_LEAGUE])
+    substitutes = events[events["Event_Type"] == "Substitute"].drop_duplicates(["MatchURL", "Team", "Event_Players"])
+    came_on = set(zip(substitutes["MatchURL"].str.extract(r"/matches/([0-9a-f]{8})/", expand=False), substitutes["Team"], substitutes["Event_Players"].str.split(" for ").str[0].str.strip()))
+    is_substitute = pd.Series([key in came_on for key in zip(positions["match"], positions["Team"], positions["Player"])], index=positions.index)
+    is_attacking = pd.Series([bool(set(pos.split(",")) & ATTACKING_POS) for pos in positions["Pos"]], index=positions.index)
+    keys = ["league", "Season_End_Year", "fbref_id"]
+    totals = pd.DataFrame({
+        "total": positions.groupby(keys)["Min"].sum(),
+        "attacking": positions[~is_substitute & is_attacking].groupby(keys)["Min"].sum(),
+        "other": positions[~is_substitute & ~is_attacking].groupby(keys)["Min"].sum(),
+    }).fillna(0)
+    return sorted(totals[(totals["total"] >= 900) & (totals["attacking"] > totals["other"])].index)
+
+
+def chance_of_passing_guard(guard, fbref_minutes, roster_of_club, clubs_of_player):
+    """How often a wrong same-club player would pass the limit, so what a pass is worth."""
+    passed = tried = 0
+    for pair, (_, understat, _) in guard.items():
+        if understat is None:
+            continue
+        for club in sorted(clubs_of_player[(pair.league, pair.season + 1, pair.fbref_id)]):
+            for other in sorted(roster_of_club[(pair.league, pair.season + 1, club)] - {pair.fbref_id}):
+                minutes = fbref_minutes.get((pair.league, pair.season + 1, other), 0)
+                tried += 1
+                passed += abs(understat - minutes) <= minutes_limit(understat, minutes)
+    return passed, tried
+
+
+def write_sample(name_map_rows, guard, names, rows_of, matches_of):
+    pairs = random.Random(SAMPLE_SEED).sample(sorted(name_map_rows), SAMPLE_SIZE)
+    with SAMPLE_FILE.open("w", encoding="utf8", newline="") as handle:
+        writer = csv.writer(handle, lineterminator="\n")
+        writer.writerow(["league", "understat_season", "understat_id", "shot_name", "fbref_id", "fbref_name", "shot_rows", "matches", "understat_minutes", "fbref_minutes", "minutes_check"])
+        for pair in sorted(pairs):
+            check, understat, fbref = guard[pair]
+            writer.writerow([pair.league, pair.season, pair.understat_id, html.unescape(pair.name), pair.fbref_id, names[pair.fbref_id], rows_of[pair], matches_of[pair], "" if understat is None else understat, fbref, check])
+    return len(pairs)
+
+
+def self_check():
+    assert compared_name("Kylian Mbappe-Lottin") == "kylian mbappe lottin"
+    assert compared_name("Martin Ødegaard") == compared_name("Martin Odegaard")
+    assert compared_name("N&#039;Golo Kanté") == "ngolo kante"
+    assert is_name_map_candidate(["bruno"], ["bruno", "fernandes"])
+    assert is_name_map_candidate(["kylian", "mbappe", "lottin"], ["kylian", "mbappe"])
+    assert not is_name_map_candidate(["bruno"], ["brunos", "fernandes"])
+    assert abs(minutes_limit(839, 933) - 93.3) < 1e-9 and minutes_limit(49, 167) == 90
+
+
+def main():
+    self_check()
+    positions = load_positions()
+    shots = load_shots()
+    clubs = understat_to_fbref_clubs()
+    links, gaps, understat_match_count = link_matches(shots, positions, clubs)
+    both_filled = shots[(shots["h_a"].fillna("") != "") & (shots["home_away"].fillna("") != "")]
+    print(f"Pool seasons: shot rows {len(shots)} | side values {dict(sorted(Counter(shots['side'].fillna('')).items()))} | h_a and home_away both filled {len(both_filled)}, disagreeing {int((both_filled['h_a'] != both_filled['home_away']).sum())}")
+    print(f"Date link: Understat matches {understat_match_count} | linked {len(links)} | gap days to matches {dict(sorted(gaps.items()))}")
+
+    rows_of, row_groups = shot_groups(shots, links, positions)
+    groups = sorted(rows_of)
+    total = sum(rows_of.values())
+    rosters = build_rosters(positions)
+    names = positions.sort_values(["Season_End_Year", "match"]).groupby("fbref_id")["Player"].first().to_dict()
+    fbref_minutes = {key: int(value) for key, value in positions.groupby(["league", "Season_End_Year", "fbref_id"])["Min"].sum().items()}
+    clubs_of_player = defaultdict(set)
+    roster_of_club = defaultdict(set)
+    for league, year, club, fbref_id in zip(positions["league"], positions["Season_End_Year"], positions["Team"], positions["fbref_id"]):
+        clubs_of_player[(league, year, fbref_id)].add(club)
+        roster_of_club[(league, year, club)].add(fbref_id)
+
+    joined = join_by_name(groups, rosters)
+    exact = {group: link for group, link in joined.items() if link[0] == "exact"}
+    after_step_1 = dict(joined)
+    mapped, stopped, conflicts = name_map_links(groups, rosters, joined)
+    after_step_2 = {**joined, **{group: ("map", fbref_id) for group, fbref_id in mapped.items()}}
+    pair_of = {group: PlayerSeasonName(group.league, group.season, group.understat_id, group.name, fbref_id) for group, fbref_id in mapped.items()}
+    name_map_rows, matches_of = Counter(), Counter()
+    for group, pair in pair_of.items():
+        name_map_rows[pair] += rows_of[group]
+        matches_of[pair] += 1
+    guard = minutes_guard(name_map_rows, season_minutes_by_name(clubs), fbref_minutes, clubs_of_player)
+    after_guard = {group: link for group, link in after_step_2.items() if link[0] != "map" or guard[pair_of[group]][0] != "disagree"}
+    collisions = id_collisions(after_guard)
+    colliding = {(league, season, understat_id) for (league, season, _), ids in collisions.items() for understat_id in ids}
+    final = {group: link for group, link in after_guard.items() if (group.league, group.season, group.understat_id) not in colliding}
+
+    def count(stage):
+        return sum(rows_of[group] for group in stage)
+
+    print("\n### Join table")
+    print(f"Pool shot rows in linked matches: {total}")
+    for label, stage in (("Exact", exact), ("After step 1", after_step_1), ("After step 2", after_step_2), ("After the minutes guard", after_guard), ("After id collisions", final)):
+        print(f"{label}: {count(stage)} ({100 * count(stage) / total:.2f}%)")
+    print(f"Unjoined: {total - count(final)}")
+    by_league = defaultdict(Counter)
+    for group in groups:
+        by_league[group.league]["all"] += rows_of[group]
+        for label, stage in (("exact", exact), ("step 1", after_step_1), ("step 2", after_step_2), ("final", final)):
+            by_league[group.league][label] += rows_of[group] if group in stage else 0
+    for league, counts in sorted(by_league.items()):
+        print(f"{league}: " + " / ".join(f"{label} {100 * counts[label] / counts['all']:.2f}" for label in ("exact", "step 1", "step 2", "final")))
+    print(f"Stopped at step 2: {dict(sorted(stopped.items()))} | listed 2+ FBref ids: {conflicts}")
+
+    print("\n### Minutes guard")
+    verdicts = Counter(result[0] for result in guard.values())
+    print(f"Name map player-seasons {len(guard)}, rows {sum(name_map_rows.values())} | {dict(sorted(verdicts.items()))}")
+    kept_pairs = {pair: rows for pair, rows in name_map_rows.items() if guard[pair][0] != "disagree"}
+    print(f"Keep their link: {len(kept_pairs)} player-seasons, {sum(kept_pairs.values())} rows")
+    for pair, (check, understat, fbref) in guard.items():
+        if check in ("disagree", "approved"):
+            print(f"  {check}: {pair.league} {pair.season} id {pair.understat_id} {html.unescape(pair.name)} to {names[pair.fbref_id]} {pair.fbref_id}: {understat} v {fbref}, gap {abs(understat - fbref)}, limit {minutes_limit(understat, fbref):.1f}, {name_map_rows[pair]} rows")
+    for pair, (check, _, fbref) in guard.items():
+        if check == "none":
+            print(f"  minutes_check = none: {pair.league} {pair.season} id {pair.understat_id} {html.unescape(pair.name)} to {names[pair.fbref_id]} {pair.fbref_id}: FBref {fbref}, {name_map_rows[pair]} rows")
+    passed, tried = chance_of_passing_guard(guard, fbref_minutes, roster_of_club, clubs_of_player)
+    print(f"Wrong same-club players who would pass the limit: {passed} of {tried} ({100 * passed / tried:.1f}%)")
+
+    print("\n### Id collisions")
+    for (league, season, fbref_id), ids in collisions.items():
+        print(f"  {league} {season} {names[fbref_id]} {fbref_id}: Understat ids {ids}, rows {sum(rows_of[group] for group in after_guard if (group.league, group.season) == (league, season) and group.understat_id in ids)}")
+    print(f"Collisions: {len(collisions)}")
+    ids_of_understat = defaultdict(set)
+    for group, (_, fbref_id) in final.items():
+        ids_of_understat[(group.league, group.season, group.understat_id, html.unescape(group.name))].add(fbref_id)
+    print("One Understat id and name on 2+ FBref ids:", [(key, sorted(ids)) for key, ids in sorted(ids_of_understat.items()) if len(ids) > 1])
+
+    print("\n### Outside checks")
+    clubs_in_match = defaultdict(set)
+    for (match, club) in rosters:
+        clubs_in_match[match].add(club)
+    other_club_only = []
+    for group in groups:
+        wanted = compared_name(group.name)
+        on_own = any(player.compared == wanted for player in rosters[(group.match, group.club)])
+        on_other = any(player.compared == wanted for club in clubs_in_match[group.match] - {group.club} for player in rosters[(group.match, club)])
+        if on_other and not on_own:
+            other_club_only.append((group.league, group.season, group.match, html.unescape(group.name), group.club, rows_of[group]))
+    print(f"h_a club holds no such name but the other club does: {len(other_club_only)} groups, {sum(item[-1] for item in other_club_only)} rows: {other_club_only}")
+    own_goal = Counter()
+    for group, result in zip(row_groups, shots["result"]):
+        if group is not None and result == "OwnGoal":
+            own_goal["joined" if group in final else "unjoined"] += 1
+    print(f"Own goal rows in linked matches: {dict(sorted(own_goal.items()))}")
+
+    print("\n### Named cases")
+    for case in NAMED_CASES:
+        found = defaultdict(int)
+        for group in groups:
+            if (group.league, group.season, group.understat_id) == case:
+                link = final.get(group)
+                found[(html.unescape(group.name), link[0] if link else "unjoined", link[1] if link else "", names.get(link[1], "") if link else "")] += rows_of[group]
+        print(f"  {case}: {[(*key, rows) for key, rows in sorted(found.items())]}")
+
+    print("\n### Still unjoined")
+    unjoined_names, unjoined_seasons = Counter(), Counter()
+    for group in groups:
+        if group not in final:
+            unjoined_names[(group.league, html.unescape(group.name))] += rows_of[group]
+            unjoined_seasons[(group.league, group.season)] += rows_of[group]
+    print("Largest:", sorted(unjoined_names.items(), key=lambda item: (-item[1], item[0]))[:12])
+    print("Per league-season:", sorted(unjoined_seasons.items()))
+
+    joined_rows, unjoined_rows = Counter(), Counter()
+    for group in groups:
+        (joined_rows if group in final else unjoined_rows)[group.player_season_name] += rows_of[group]
+    partly = sorted(((name, joined_rows[name], unjoined_rows[name]) for name in joined_rows if name in unjoined_rows), key=lambda item: (-item[2], item[0]))
+    print(f"Player-seasons partly joined: {len(partly)}, holding {sum(item[2] for item in partly)} unjoined rows. Largest, as (league, season, id, name), joined, unjoined: {partly[:12]}")
+
+    pool = pool_candidates(positions)
+    with_shots = {(group.league, group.season + 1, link[1]) for group, link in final.items()}
+    print(f"\nPool candidates with shots: {sum(key in with_shots for key in pool)} of {len(pool)} ({100 * sum(key in with_shots for key in pool) / len(pool):.2f}%)")
+    print("No shots:", sorted((key[0], key[1], names[key[2]]) for key in pool if key not in with_shots))
+
+    final_pairs = {pair_of[group] for group, link in final.items() if link[0] == "map"}
+    sampled = write_sample(final_pairs, guard, names, name_map_rows, matches_of)
+    print(f"\n### Sample\n{sampled} of {len(final_pairs)} name map pairs, seed {SAMPLE_SEED}, written to {SAMPLE_FILE.relative_to(ROOT)}")
+
+    print("\n### Checks")
+    checks = {
+        "no id collisions": not collisions,
+        f"at least {MIN_JOINED_ROWS} rows joined": count(final) >= MIN_JOINED_ROWS,
+        "Ezzalzouli approved": verdicts["approved"] == 1 and all(guard[pair][0] == "approved" for pair in APPROVED_LINKS),
+        f"sample holds {SAMPLE_SIZE} rows": sampled == SAMPLE_SIZE,
+    }
+    for label, passed_check in checks.items():
+        print(f"{'PASS' if passed_check else 'FAIL'}: {label}")
+    if not all(checks.values()):
+        raise SystemExit(1)
+
+
+if __name__ == "__main__":
+    main()
