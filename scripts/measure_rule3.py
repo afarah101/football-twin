@@ -5,33 +5,35 @@ Usage: python3 scripts/measure_rule3.py
 Prints the join table, the minutes guard results, the season anchors, the partial joins and the id collisions, with the
 checks behind them. Writes a fixed
 random sample of the name map to docs/reports/name_map_sample.csv. Reads data/standin only, makes no network calls, and
-the same files give identical output. Of review_decisions.csv it applies only `approve` on a link, at the guard, and only
+the same files give identical output. It runs twice, with the FBref id merges off and then on, and prints one `Merges` line for
+each. Every other section, and the sample, come from the merges-on run only. Of review_decisions.csv it applies only `approve` on a link, at the guard, and only
 that row stops on a stale key. It prints any other row as not applied. read_review_decisions adds two stops, on an unknown
 value and on two rows with one key. All the plan's other stops are #6 work.
-Exits non-zero if a check at the end fails. Measured before any FBref id merges, because #6 owns those. The plan runs the
-guard after them.
+Exits non-zero if a check at the end fails.
 """
+import contextlib
 import csv
 import html
+import io
 import random
 import re
+import sys
 import unicodedata
 from collections import Counter, defaultdict
-from datetime import date
 from pathlib import Path
 from typing import NamedTuple
 
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+from twin.infrastructure.standin.player_join import SHOT_FILE_OF_LEAGUE, link_matches, load_positions, load_shots, merge_fbref_ids, positions_for_join, understat_to_fbref_clubs
+
 DATA = ROOT / "data" / "standin"
 SAMPLE_FILE = ROOT / "docs" / "reports" / "name_map_sample.csv"
 SAMPLE_SEED = 20261104
 SAMPLE_SIZE = 50
 
-SHOT_FILE_OF_LEAGUE = {"ENG": "epl", "ESP": "la_liga", "FRA": "ligue_1", "GER": "bundesliga", "ITA": "serie_a"}
-POOL_FIRST_SEASON, POOL_LAST_SEASON = 2017, 2023
-MAX_LINK_GAP_DAYS = 14
 FOLDED_LETTERS = str.maketrans({"ø": "o", "ð": "d", "đ": "dj", "ı": "i", "ł": "l", "ß": "ss", "æ": "ae", "œ": "oe", "þ": "th"})
 ATTACKING_POS = {"FW", "LW", "RW", "AM"}
 DECISIONS_FILE = DATA / "review_decisions.csv"
@@ -44,8 +46,8 @@ NAMED_CASES = (
     ("ESP", 2021, 2098), ("ESP", 2021, 8978), ("ESP", 2023, 2400), ("ESP", 2023, 8042), ("ITA", 2019, 1140), ("ITA", 2019, 2244),
 )
 MIN_JOINED_ROWS = 315_073
-# With the current review_decisions.csv, before #6's FBref id merges, which give 3,109 of 3,137. A new `approve` can move them.
-EXPECTED_POOL, EXPECTED_CANDIDATES = 3_108, 3_136
+# With the current review_decisions.csv, as (Pool, candidates). A new `approve` can move them.
+EXPECTED_MERGES_OFF, EXPECTED_MERGES_ON = (3_108, 3_136), (3_109, 3_137)
 MIN_ANCHOR_MATCHES = 2
 FULL_JOIN_PERCENT = 95
 
@@ -115,57 +117,6 @@ def minutes_limit(understat_minutes, fbref_minutes):
 def is_name_map_candidate(shot_words, roster_words):
     """Step 2: shares the last name, or one name holds the other as whole words, in any order."""
     return roster_words[-1] == shot_words[-1] or set(shot_words) <= set(roster_words) or set(roster_words) <= set(shot_words)
-
-
-def load_positions():
-    frames = []
-    for league in SHOT_FILE_OF_LEAGUE:
-        columns = ["MatchURL", "Match_Date", "Matchweek", "Season_End_Year", "Home_Team", "Away_Team", "Team", "Player", "Player_Href", "Pos", "Min"]
-        frames.append(pd.read_parquet(DATA / f"{league}_M_1st_positions.parquet", columns=columns).assign(league=league))
-    rows = pd.concat(frames, ignore_index=True)
-    rows = rows[rows["Season_End_Year"].between(POOL_FIRST_SEASON + 1, POOL_LAST_SEASON + 1) & ~rows["Matchweek"].str.contains("tie-breaker")].copy()
-    rows["match"] = rows["MatchURL"].str.extract(r"/matches/([0-9a-f]{8})/", expand=False)
-    rows["fbref_id"] = rows["Player_Href"].str.extract(r"/players/([0-9a-f]{8})/", expand=False)
-    return rows
-
-
-def load_shots():
-    frames = []
-    for league, stem in SHOT_FILE_OF_LEAGUE.items():
-        columns = ["season", "match_id", "date", "player", "player_id", "home_team", "away_team", "h_a", "home_away", "result"]
-        frames.append(pd.read_parquet(DATA / f"{stem}_shot_data.parquet", columns=columns).assign(league=league))
-    rows = pd.concat(frames, ignore_index=True)
-    rows = rows[rows["season"].between(POOL_FIRST_SEASON, POOL_LAST_SEASON)].copy()
-    rows["season"] = rows["season"].astype(int)
-    rows["player_id"] = rows["player_id"].astype(int)
-    # Every row fills exactly one of the two columns: main prints the check.
-    rows["side"] = rows["h_a"].where(rows["h_a"].fillna("") != "", rows["home_away"])
-    if not set(rows["side"].fillna("")) <= {"h", "a"}:
-        raise SystemExit("a Pool shot row has no side, or an unknown one")
-    return rows
-
-
-def understat_to_fbref_clubs():
-    club_map = pd.read_csv(DATA / "club_map.csv", keep_default_na=False)
-    return {(row.league, row.understat_club): row.fbref_club for row in club_map.itertuples() if row.understat_club and row.fbref_club}
-
-
-def link_matches(shots, positions, clubs):
-    """Rule 2: same home club and same away club, in that order, same season, nearest FBref date, at most 14 days."""
-    fbref_matches = positions.drop_duplicates("match")
-    by_pair = defaultdict(list)
-    for row in fbref_matches.itertuples():
-        by_pair[(row.league, row.Season_End_Year, row.Home_Team, row.Away_Team)].append((date.fromisoformat(row.Match_Date[:10]), row.match))
-    links, gaps = {}, Counter()
-    understat_matches = shots.drop_duplicates(["league", "match_id"])
-    for row in understat_matches.itertuples():
-        pair = (row.league, row.season + 1, clubs.get((row.league, row.home_team)), clubs.get((row.league, row.away_team)))
-        day = date.fromisoformat(row.date[:10])
-        options = sorted((abs((match_day - day).days), match) for match_day, match in by_pair.get(pair, []))
-        if options and options[0][0] <= MAX_LINK_GAP_DAYS:
-            links[(row.league, row.match_id)] = options[0][1]
-            gaps[options[0][0]] += 1
-    return links, gaps, len(understat_matches)
 
 
 def shot_groups(shots, links, positions):
@@ -393,12 +344,10 @@ def self_check():
     assert name_map_links(spellings, roster_with("y"), {spellings[0]: ("exact", "x"), spellings[1]: ("exact", "y")})[3] == []
 
 
-def main():
-    self_check()
-    positions = load_positions()
-    shots = load_shots()
-    clubs = understat_to_fbref_clubs()
-    links, gaps, understat_match_count = link_matches(shots, positions, clubs)
+def measure(positions, shots, clubs):
+    """One whole run. Returns the joined rows, the Pool count, the candidates and the checks, and writes the sample."""
+    date_links = link_matches(shots, positions, clubs)
+    links, gaps, understat_match_count = date_links.links, Counter(date_links.gap_days.values()), date_links.understat_matches
     both_filled = shots[(shots["h_a"].fillna("") != "") & (shots["home_away"].fillna("") != "")]
     print(f"Pool seasons: shot rows {len(shots)} | side values {dict(sorted(Counter(shots['side'].fillna('')).items()))} | h_a and home_away both filled {len(both_filled)}, disagreeing {int((both_filled['h_a'] != both_filled['home_away']).sum())}")
     print(f"Date link: Understat matches {understat_match_count} | linked {len(links)} | gap days to matches {dict(sorted(gaps.items()))}")
@@ -597,15 +546,30 @@ def main():
     sampled = write_sample(final_pairs, guard, names, name_map_rows, matches_of)
     print(f"\n### Sample\n{sampled} of {len(final_pairs)} name map pairs, seed {SAMPLE_SEED}, written to {SAMPLE_FILE.relative_to(ROOT)}")
 
-    print("\n### Checks")
-    checks = {
+    return count(final), pool_count, len(pool), {
         "no id collisions": not collisions,
         f"at least {MIN_JOINED_ROWS} rows joined": count(final) >= MIN_JOINED_ROWS,
-        f"Pool is {EXPECTED_POOL}": pool_count == EXPECTED_POOL,
-        f"candidates are {EXPECTED_CANDIDATES}": len(pool) == EXPECTED_CANDIDATES,
         "Ezzalzouli approved": any(pair.name == "Abdessamad Ezzalzouli" and result[0] == "approved" for pair, result in guard.items()),
         f"sample holds {SAMPLE_SIZE} rows": sampled == SAMPLE_SIZE,
     }
+
+
+def main():
+    self_check()
+    unmerged = positions_for_join(merges=False)
+    shots = load_shots()
+    clubs = understat_to_fbref_clubs()
+    # The sample file is written by whichever run comes last, so the merges-on run must stay last.
+    with contextlib.redirect_stdout(io.StringIO()):
+        joined_off, pool_off, candidates_off, _ = measure(unmerged, shots, clubs)
+    merged, merges, refused = merge_fbref_ids(unmerged)
+    joined_on, pool_on, candidates_on, checks = measure(merged, shots, clubs)
+    print(f"\n### Id merges\nMerged: {[(merge.league, merge.year, merge.player, merge.ids, merge.survivor) for merge in merges]} | refused: {refused}")
+    print(f"Merges off: joined {joined_off} | Pool {pool_off} of {candidates_off}")
+    print(f"Merges on: joined {joined_on} | Pool {pool_on} of {candidates_on}")
+    checks[f"merges off: Pool is {EXPECTED_MERGES_OFF}"] = (pool_off, candidates_off) == EXPECTED_MERGES_OFF
+    checks[f"merges on: Pool is {EXPECTED_MERGES_ON}"] = (pool_on, candidates_on) == EXPECTED_MERGES_ON
+    print("\n### Checks")
     for label, passed_check in checks.items():
         print(f"{'PASS' if passed_check else 'FAIL'}: {label}")
     if not all(checks.values()):

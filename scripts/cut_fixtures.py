@@ -1,6 +1,9 @@
-"""Cut small real samples from the stand-in originals into tests/fixtures/standin/, and write its README.
+"""Cut small real samples into tests/fixtures/standin/, and write their READMEs.
 
 Usage: python3 scripts/cut_fixtures.py <folder holding the release assets> [output folder]
+       python3 scripts/cut_fixtures.py --rule3 [output folder]
+
+The second form cuts the rule3__* samples from data/standin/ for the join module's tests.
 
 The originals are the assets of the private release named in SOURCE_RELEASE. Each one is checked against its
 SHA-256 before use. Rows are never edited: each fixture is one source file, one row filter, all columns and the
@@ -22,6 +25,9 @@ warnings.filterwarnings("ignore", message="Missing constructor for R class")
 
 SOURCE_RELEASE = "https://github.com/afarah101/football-twin/releases/tag/stand-in-originals"
 MAX_BYTES = 1_000_000
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+from twin.infrastructure.standin import player_join as join
 
 SHA256 = {
     "bundesliga_shot_data.rds": "7481d4eea7a32c261ae45711e735a074c23aa4530a181c7f3c490150e8639bee",
@@ -79,6 +85,21 @@ SAMPLES = [
     Sample("current_season", "bundesliga_shot_data.rds", (("player", "Cameron Puertas"), ("season", 2025)), 3, "A 2025/26 player, under 900 minutes. The files stop in September 2025."),
     Sample("current_season", "GER" + PASSING, (("Player_Href", PUERTAS), ("Season_End_Year", 2026)), 1, "The same player's FBref row. HF has no 2025/26 rows."),
 ]
+
+# Whole Understat matches as (league, season, home, away), each with its linked FBref match.
+RULE3_SHOT_MATCHES = (
+    ("ESP", 2023, "Getafe", "Cadiz"), ("ESP", 2023, "Cadiz", "Getafe"),  # both legs of one pair
+    ("ENG", 2023, "Brighton", "Everton"),  # the club map changes the name
+    ("FRA", 2017, "Caen", "Toulouse"), ("FRA", 2022, "Strasbourg", "Lyon"), ("ITA", 2023, "Udinese", "Roma"),  # the 3 gaps over 1 day
+    ("ITA", 2023, "Atalanta", "Fiorentina"),  # no FBref minutes, so 20 rows drop
+    ("GER", 2023, "Bochum", "Augsburg"),
+)
+# Whole shot matches by id, for rows outside the Pool seasons or with one spelling of the league.
+RULE3_SHOT_MATCH_IDS = (("ESP", 1779), ("ESP", 5826), ("ESP", 18962))
+RULE3_FBREF_MATCHES = ("e0449015",)  # Spezia v Hellas Verona, the one tie-breaker
+# Taken by club names, not through the link under test, as (league, year, home, away).
+RULE3_FBREF_PAIRS = (("ITA", 2024, "Atalanta", "Fiorentina"),)
+RULE3_FBREF_IDS = ("ac4a4508", "674cfc5a", "8eb68164", "cb9ef70f", "1d039497", "f365b837", "cfd8d664", "9ba48d64")  # the 3 merges, and Juanfran at 2 teams
 
 NOT_FOUND = [
     ("A `Sub` Pos label", "FBref Pos has no `Sub` value in any stat file. Substitute appearances are taken from `Substitute` event rows instead."),
@@ -176,6 +197,56 @@ def main(originals, out):
     (out / "README.md").write_text(readme(lines), encoding="utf8")
 
 
+def rule3_shot_keys(shots):
+    """The (league, match_id) of every Understat match the cases name."""
+    keys = set(RULE3_SHOT_MATCH_IDS)
+    for league, season, home, away in RULE3_SHOT_MATCHES:
+        found = shots[(shots["league"] == league) & (shots["season"] == season) & (shots["home_team"] == home) & (shots["away_team"] == away)]
+        if found.empty:
+            raise SystemExit(f"no shot rows for {league} {season} {home} v {away}")
+        keys |= set(zip(found["league"], found["match_id"]))
+    return keys
+
+
+def cut_rule3(out):
+    """Whole rows of data/standin, filtered and never edited, under the same file names with a rule3__ prefix."""
+    source = join.StandinFiles()
+    shots = join.load_shots(source)
+    keys = rule3_shot_keys(join.shot_files(source))
+    links = join.link_matches(shots, join.load_positions(source), join.understat_to_fbref_clubs(source)).links
+    fbref_matches = set(RULE3_FBREF_MATCHES) | {links[key] for key in keys if key in links}
+    lines = []
+
+    def write(frame, name, why):
+        write_fixture(frame, out / f"rule3__{name}")
+        lines.append(f"| `rule3__{name}` | `data/standin/{name}` | {len(frame)} | {why} |")
+        print(f"rule3__{name}\t{len(frame)}\t{(out / f'rule3__{name}').stat().st_size}")
+
+    for league, stem in join.SHOT_FILE_OF_LEAGUE.items():
+        rows = pd.read_parquet(source.path(f"{league}_M_1st_positions.parquet"))
+        match = rows["MatchURL"].str.extract(r"/matches/([0-9a-f]{8})/", expand=False)
+        fbref_id = rows["Player_Href"].str.extract(r"/players/([0-9a-f]{8})/", expand=False)
+        pairs = {(year, home, away) for found_league, year, home, away in RULE3_FBREF_PAIRS if found_league == league}
+        in_pair = pd.Series([key in pairs for key in zip(rows["Season_End_Year"], rows["Home_Team"], rows["Away_Team"])], index=rows.index)
+        write(rows[match.isin(fbref_matches) | fbref_id.isin(RULE3_FBREF_IDS) | in_pair], f"{league}_M_1st_positions.parquet", "Whole FBref matches, and every row of the named ids")
+        rows = pd.read_parquet(source.path(f"{stem}_shot_data.parquet"))
+        write(rows[[(league, match_id) in keys for match_id in rows["match_id"]]], f"{stem}_shot_data.parquet", "Whole Understat matches")
+    (out / "rule3__club_map.csv").write_bytes(source.path("club_map.csv").read_bytes())
+    lines.append("| `rule3__club_map.csv` | `data/standin/club_map.csv` | all | The whole map |")
+    table = "\n".join(lines)
+    (out / "rule3__README.md").write_text(f"""# rule3__ samples
+
+Real rows for `tests/test_player_join.py`, cut from `data/standin/` and never edited. Generated by `python3 scripts/cut_fixtures.py --rule3`, so do not edit by hand. The cases are the `RULE3_*` lists in `scripts/cut_fixtures.py`.
+
+| Fixture | Source file | Rows | What it holds |
+|---|---|---:|---|
+{table}
+""", encoding="utf8")
+
+
 if __name__ == "__main__":
-    default_out = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "standin"
-    main(Path(sys.argv[1]), Path(sys.argv[2]) if len(sys.argv) > 2 else default_out)
+    default_out = ROOT / "tests" / "fixtures" / "standin"
+    if sys.argv[1] == "--rule3":
+        cut_rule3(Path(sys.argv[2]) if len(sys.argv) > 2 else default_out)
+    else:
+        main(Path(sys.argv[1]), Path(sys.argv[2]) if len(sys.argv) > 2 else default_out)

@@ -23,7 +23,7 @@ class TwoShotNamesReachOnePlayer(unittest.TestCase):
         shots = rule3.load_shots()
         shots = shots[(shots["league"] == "ESP") & (shots["season"] == 2020)]
         cls.clubs = rule3.understat_to_fbref_clubs()
-        links, _, _ = rule3.link_matches(shots, positions, cls.clubs)
+        links = rule3.link_matches(shots, positions, cls.clubs).links
         cls.rows_of, _ = rule3.shot_groups(shots, links, positions)
         rosters = rule3.build_rosters(positions)
         joined = rule3.join_by_name(sorted(cls.rows_of), rosters)
@@ -68,7 +68,7 @@ class NameWordsInAnotherOrder(unittest.TestCase):
         positions = positions[(positions["league"] == "ENG") & positions["Season_End_Year"].between(2022, 2024)]
         shots = rule3.load_shots()
         shots = shots[(shots["league"] == "ENG") & shots["season"].between(2021, 2023)]
-        links, _, _ = rule3.link_matches(shots, positions, rule3.understat_to_fbref_clubs())
+        links = rule3.link_matches(shots, positions, rule3.understat_to_fbref_clubs()).links
         rows_of, _ = rule3.shot_groups(shots, links, positions)
         rosters = rule3.build_rosters(positions)
         cls.joined = rule3.join_by_name(sorted(rows_of), rosters)
@@ -93,7 +93,7 @@ class RosterNameInsideTheShotName(unittest.TestCase):
         positions = rule3.load_positions()
         shots = rule3.load_shots()
         shots = shots[shots["match_id"].isin(shots.loc[shots["player_id"] == BABA_ID, "match_id"])]
-        links, _, _ = rule3.link_matches(shots, positions, rule3.understat_to_fbref_clubs())
+        links = rule3.link_matches(shots, positions, rule3.understat_to_fbref_clubs()).links
         rows_of, _ = rule3.shot_groups(shots, links, positions)
         rosters = rule3.build_rosters(positions)
         joined = rule3.join_by_name(sorted(rows_of), rosters)
