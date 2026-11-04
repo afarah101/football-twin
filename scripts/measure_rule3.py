@@ -109,7 +109,7 @@ def minutes_limit(understat_minutes, fbref_minutes):
 
 
 def is_name_map_candidate(shot_words, roster_words):
-    """Step 2: shares the last name, or one name holds the other as whole words."""
+    """Step 2: shares the last name, or one name holds the other as whole words, in any order."""
     return roster_words[-1] == shot_words[-1] or set(shot_words) <= set(roster_words) or set(roster_words) <= set(shot_words)
 
 
@@ -223,12 +223,12 @@ def name_map_links(groups, rosters, joined):
             stopped["two shot names on one roster player"] += len(claimants)
         else:
             links[claimants[0]] = fbref_id
-    ids_of_name = defaultdict(set)
+    ids_of_player_season = defaultdict(set)
     for group, fbref_id in links.items():
-        ids_of_name[group.player_season_name].add(fbref_id)
-    conflicts = sorted(key for key, ids in ids_of_name.items() if len(ids) > 1)
+        ids_of_player_season[(group.league, group.season, group.understat_id)].add(fbref_id)
+    conflicts = sorted(key for key, ids in ids_of_player_season.items() if len(ids) > 1)
     stopped["player-seasons reaching 2+ FBref ids"] = len(conflicts)
-    return {group: fbref_id for group, fbref_id in links.items() if group.player_season_name not in conflicts}, undecided, stopped, conflicts
+    return {group: fbref_id for group, fbref_id in links.items() if (group.league, group.season, group.understat_id) not in conflicts}, undecided, stopped, conflicts
 
 
 def season_anchor_links(undecided, linked):
@@ -375,6 +375,10 @@ def self_check():
     assert season_anchor_links({shot("m3"): {"x", "y"}, shot("m3", 2): {"x", "y"}}, {**two_other, shot("m1", 2): ("map", "x"), shot("m2", 2): ("map", "x")})[0] == {}
     assert list(partial_joins({shot("m1"): 19, shot("m2"): 1}, {shot("m1")})) == []
     assert list(partial_joins({shot("m1"): 18, shot("m2"): 2}, {shot("m1")})) == [("ESP", 2021, 1)]
+    spellings = [ShotGroup("GER", 2023, "m1", 1, "Sehrou Guirassy", "A"), ShotGroup("GER", 2023, "m2", 1, "Serhou Guirassy", "A")]
+    roster_with = lambda second_id: {("m1", "A"): [RosterPlayer("x", "S Guirassy", "s guirassy")], ("m2", "A"): [RosterPlayer(second_id, "S Guirassy", "s guirassy")]}
+    assert len(name_map_links(spellings, roster_with("x"), {})[0]) == 2
+    assert name_map_links(spellings, roster_with("y"), {})[0] == {}
 
 
 def main():
@@ -525,8 +529,8 @@ def main():
     print(f"Collisions: {len(collisions)}")
     ids_of_understat = defaultdict(set)
     for group, (_, fbref_id) in final.items():
-        ids_of_understat[(group.league, group.season, group.understat_id, html.unescape(group.name))].add(fbref_id)
-    print("One Understat id and name on 2+ FBref ids:", [(key, sorted(ids)) for key, ids in sorted(ids_of_understat.items()) if len(ids) > 1])
+        ids_of_understat[(group.league, group.season, group.understat_id)].add(fbref_id)
+    print("One Understat id on 2+ FBref ids:", [(key, sorted(ids)) for key, ids in sorted(ids_of_understat.items()) if len(ids) > 1])
 
     print("\n### Outside checks")
     clubs_in_match = defaultdict(set)

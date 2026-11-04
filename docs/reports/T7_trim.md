@@ -44,7 +44,7 @@ Run date: 2026-11-04, the re-trim and the rule 3 measurement. First trim: 2026-1
 4. Majority `Pos`. The trim applies it, because `data/standin/` holds one `Pos` per row and #6 would have nothing to count. Each row records `Pos_Files_Voted` and `Pos_Tie`.
 5. #6 re-cuts `tests/fixtures/standin/` from `data/standin/`. Those fixtures still hold the original schema.
 
-**Open for Ahmed:** the 50 pairs in `docs/reports/name_map_sample.csv`, and the `partial_join` player-seasons under "Joining shots to players". Decisions go in `data/standin/review_decisions.csv`, which the plan's rule 3 defines. Row 1 is the Ezzalzouli approval. `scripts/measure_rule3.py` reads the file. It applies only `approve` on a link, at the guard rather than after rule 3, so its "After the minutes guard" line already holds the 30 Ezzalzouli rows. It prints any other row, including `merge_ids`, as not applied, so its numbers are otherwise before the decisions.
+**Open for Ahmed:** the 50 pairs in `docs/reports/name_map_sample.csv`, and the `partial_join` player-seasons and Bamo Meïté FRA 2023/24 under "Joining shots to players". Decisions go in `data/standin/review_decisions.csv`, which the plan's rule 3 defines. Row 1 is the Ezzalzouli approval. `scripts/measure_rule3.py` reads the file. It applies only `approve` on a link, at the guard rather than after rule 3, so its "After the minutes guard" line already holds the 30 Ezzalzouli rows. It prints any other row, including `merge_ids`, as not applied, so its numbers are otherwise before the decisions.
 
 ## Known limits, from the audit of `6666192`
 
@@ -123,7 +123,7 @@ new candidates: [('ITA', 2024, '674cfc5a')]
 
 **F10, changes no message or report had stated:**
 
-- `021e499` removed `minutes_check = approved` from the plan's `name_map.csv` line. The line now names only `minutes_check = none`, yet the 1,117 pairs still include Ezzalzouli, whose check is `approved`.
+- `021e499` removed `minutes_check = approved` from the plan's `name_map.csv` line. It is back: the line now names `minutes_check = none` and `minutes_check = approved`, which matches the 1,117 pairs, including Ezzalzouli, whose check is `approved`.
 - `approved_keys` in `scripts/measure_rule3.py` holds `approve` rows of both link item types, so an `approve` on a `name_map` key also approves a `season_anchor` link with the same key, and the reverse.
 - `read_review_decisions` reads with `utf-8-sig`, so a byte order mark from a spreadsheet save does not break the first column. The plan does not ask for this.
 
@@ -185,6 +185,10 @@ Pool until Ahmed's review: 3108 of 3136 candidates
   - **Above the line, no flag:** Marc Cardona ESP 2023/24 has 21 of 22 rows joined (95.5%).
   - **Pool candidates, 28, out of the Pool until Ahmed reviews them:** this leaves 3,108 of 3,136, before #6's id merges. They are Dennis Johnsen above and the 27 Pool candidates with no joined shots, which the plan's rule also flags because they hold no link to their Understat rows. They include Ruslan Malinovskyi, Isaac Palazón Camacho, Cucho and Javier Hernández. Some are the same people as the 144, seen from the FBref side, so the two counts do not add up to a total.
 - **One Understat id on 2+ FBref ids:** Joseph N'Duquidi FRA 2023/24 and Gabriel Strefezza ITA 2023/24. These are the known two-id players that the plan's id merge handles.
+- **Bamo Meïté FRA 2023/24, for Ahmed's review:** Understat gives 761 minutes. FBref gives Bamo Meïté `04ac78d2` 481 (Lorient 146, Marseille 335) and Abdoul Meité 303 (Marseille, `8eb68164` 296 and `cb9ef70f` 7).
+  - **"Same player" is an inference from minutes.** No file says so, and no outside source was checked. Together FBref's two names give 784, a gap of 23 to Understat, against a gap of 280 for Bamo alone. Also consistent with it: the 3 ids share no match, and Understat's season file holds no other Meité that season.
+  - **What it changes today:** nothing in the numbers. The 1 shot row joins `04ac78d2` at the exact step, so the guard never compares these minutes. The plan's id merge joins Abdoul's 2 ids but not Bamo's, because the names differ. Neither name is a Pool candidate, and 784 is under the 900-minute gate.
+  - **If they are the same player:** `review_decisions.csv` has no row type that merges two FBref ids with different names, so #6 would need one.
 - **Still unjoined:** 2,312 rows. The largest are Ruslan Malinovskiy (261 rows in ITA), Isi Palazón (224), Juan Camilo Hernández (153), Simy (128) and Silas Wamangituka (112). 27 Pool candidates have no joined shots, for example Javier Hernández ("Chicharito"), Cucho and Silas Katompa.
 - **Named cases:** Raul García 8042 to FBref's Raúl `18f0a9f0`; Raúl García 5114 to `1a317a1b`; Bruno 2302 to Bruno Soriano `09332647`; Ousmane Camara 11016 to `7d3dfdfd` and 11249 to `5a6b06cd`; Luis Suárez 2098 to `a6154613` and 8978 to Luis Javier Suárez `eeba07f8`; Danilo 2244 to `94b2001f` and 1140 to Danilo Larangeira `fed5f993`.
 

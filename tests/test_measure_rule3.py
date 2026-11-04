@@ -9,6 +9,7 @@ import measure_rule3 as rule3
 ANGEL_ID, CHEMA_ID = 4136, 6216
 ANGEL_RODRIGUEZ = "8cfc2f69"
 MATCHES_WITH_BOTH = {"92f705d2", "add782a1"}
+HWANG_ID, HWANG_FBREF_ID = 8845, "169fd162"
 
 
 class TwoShotNamesReachOnePlayer(unittest.TestCase):
@@ -55,6 +56,33 @@ class TwoShotNamesReachOnePlayer(unittest.TestCase):
         partial = rule3.partial_joins(self.rows_of, self.final)
         self.assertNotIn(("ESP", 2020, ANGEL_ID), partial)
         self.assertIn(("ESP", 2020, CHEMA_ID), partial)
+
+
+class NameWordsInAnotherOrder(unittest.TestCase):
+    """ENG 2021/22 to 2023/24 Wolves: the shot name "Hee-Chan Hwang" is FBref's "Hwang Hee-chan". Step 1 compares in order, so only step 2 can link them."""
+
+    @classmethod
+    def setUpClass(cls):
+        positions = rule3.load_positions()
+        positions = positions[(positions["league"] == "ENG") & positions["Season_End_Year"].between(2022, 2024)]
+        shots = rule3.load_shots()
+        shots = shots[(shots["league"] == "ENG") & shots["season"].between(2021, 2023)]
+        links, _, _ = rule3.link_matches(shots, positions, rule3.understat_to_fbref_clubs())
+        rows_of, _ = rule3.shot_groups(shots, links, positions)
+        rosters = rule3.build_rosters(positions)
+        cls.joined = rule3.join_by_name(sorted(rows_of), rosters)
+        cls.mapped = rule3.name_map_links(sorted(rows_of), rosters, cls.joined)[0]
+        cls.hwang = [group for group in rows_of if group.understat_id == HWANG_ID]
+
+    def test_step_1_does_not_link_them(self):
+        self.assertTrue(self.hwang)
+        for group in self.hwang:
+            self.assertNotIn(group, self.joined)
+
+    def test_step_2_links_them_in_all_three_seasons(self):
+        self.assertEqual({group.season for group in self.hwang}, {2021, 2022, 2023})
+        for group in self.hwang:
+            self.assertEqual(self.mapped.get(group), HWANG_FBREF_ID)
 
 
 if __name__ == "__main__":
