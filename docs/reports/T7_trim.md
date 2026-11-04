@@ -1,6 +1,6 @@
 # T7: stand-in backfill, trim into private Parquet
 
-Run date: 2026-11-03. Issue: #7. Repo position at the first trim: `39b1c3a`, level with origin. This version is the re-trim Ahmed asked for after `8c93206`. Every number below comes from output shown in this report. The check scripts are in the appendix, because they sit outside this task's scope.
+Run date: 2026-11-04, the re-trim and the rule 3 measurement. First trim: 2026-11-03. Issue: #7. Repo position at the first trim: `39b1c3a`, level with origin. This version is the re-trim Ahmed asked for after `8c93206`. Numbers come from output shown in this report, or from the script or commit the text names. The two audit sections say where theirs come from. The check scripts are in the appendix, because they sit outside this task's scope.
 
 ## Verdict
 
@@ -40,11 +40,11 @@ Run date: 2026-11-03. Issue: #7. Repo position at the first trim: `39b1c3a`, lev
 
 1. Tie-breaker matches are excluded from minutes and shots, by filtering on `Matchweek`. #6 does this. The shot file has no rows on that date, so only minutes change.
 2. Pool seasons only (2017/18-2023/24): shot rows for matches with no FBref minutes are dropped, and #6 reports the rows per league-season. 2014/15-2016/17 shot rows stay unchanged. **The date link is decided:** same home club and same away club, in that order, in the same season, nearest FBref date, at most 14 days. Over 14 days is no link, and the rows are dropped and counted. #6 records `date_gap_days` on every linked row and lists every gap over 1 day. `home_team` and `away_team` in the shot files, and `Home_Team` and `Away_Team` in the positions files, are there for this.
-3. One player under two FBref ids merges only when name, team and season match and their matches never overlap. #6 does this and lists every merge. Before merging, #6 should note that Strefezza's two ids total 1113 minutes.
+3. One player under two FBref ids merges only when name, team and season match and their matches never overlap. #6 does this and lists every merge. Before merging, #6 should note that Strefezza's two ids total 1113 minutes. The merge moves the Pool to 3,109, see F3 in the audit of `6666192..811d245`.
 4. Majority `Pos`. The trim applies it, because `data/standin/` holds one `Pos` per row and #6 would have nothing to count. Each row records `Pos_Files_Voted` and `Pos_Tie`.
 5. #6 re-cuts `tests/fixtures/standin/` from `data/standin/`. Those fixtures still hold the original schema.
 
-**Open for Ahmed:** the 50 pairs in `docs/reports/name_map_sample.csv`, and the `partial_join` player-seasons under "Joining shots to players". Decisions go in `data/standin/review_decisions.csv`, which the plan's rule 3 defines. Row 1 is the Ezzalzouli approval. `scripts/measure_rule3.py` reads the file. It applies only `approve` on a link, at the guard rather than after rule 3, so its "After the minutes guard" line already holds the 30 Ezzalzouli rows. It prints any other row as not applied, so its numbers are otherwise before the decisions.
+**Open for Ahmed:** the 50 pairs in `docs/reports/name_map_sample.csv`, and the `partial_join` player-seasons under "Joining shots to players". Decisions go in `data/standin/review_decisions.csv`, which the plan's rule 3 defines. Row 1 is the Ezzalzouli approval. `scripts/measure_rule3.py` reads the file. It applies only `approve` on a link, at the guard rather than after rule 3, so its "After the minutes guard" line already holds the 30 Ezzalzouli rows. It prints any other row, including `merge_ids`, as not applied, so its numbers are otherwise before the decisions.
 
 ## Known limits, from the audit of `6666192`
 
@@ -59,6 +59,81 @@ Logged, not fixed. The numbers here come from that audit, not from output in thi
 | F9 | The audit did not re-run the `pyreadr` check, the mutation test or the fresh-venv run, and has no record to check the code review log against. Ahmed's two re-date checks are not from the data files. An outside source confirms Caen v Toulouse. For Udinese v Roma, only the shot minutes are consistent with it. |
 | F10 | Closed. "Ready for #6: YES" stood while the club map review was open, and Ahmed has since approved the map, see section 9. |
 | F11 | The plan's "Each ordered pair plays once per season" holds only after the tie-breaker filter. Spezia v Hellas Verona appears twice in 2022/23. The nearest date still picks the right match. |
+
+## Audit of `6666192..811d245`
+
+Run 2026-11-04. Verdict FAIL: 0 Critical, 1 Major, 11 Minor. Its F numbers are its own, not those in the table above. Its numbers come from that audit, except where a line says they were re-measured.
+
+**Fixed or stated:**
+
+| Finding | State |
+|---|---|
+| F1, Major | The plan's step 2 said two shot names reaching one roster player block each other, but the code lets a name with 2+ candidates link no one and block no one. "Ángel" links to Ángel Rodríguez, ESP 2020/21 Getafe, while "Chema Rodríguez" has Chema and Ángel Rodríguez as candidates. Under the old wording id 4136 falls to 30 of 38 rows, gets `partial_join = yes` and the Pool is 3,107. The plan now matches the code. `tests/test_measure_rule3.py` holds the case. Patching `name_map_links` to drop any link to a candidate of a 2+ candidate name, the old wording's behaviour, makes 2 of its 4 tests fail. |
+| F2 | The script's docstrings no longer read as if every stale or invalid row stops. Today a stale key stops only for `approve` on a link. Unknown values and two rows on one key stop for every row. The plan's other stops are #6 work. |
+| F3 | **#6's id merges move the Pool.** Re-measured, see the output below: applying the plan's merge rule in memory and running the script gives 3 merges (Abdoul Meité, Joseph Nduquidi and Gabriel Strefezza, all 2023/24), 3,137 candidates and a Pool of **3,109**, not 3,108. The only new candidate is Strefezza ITA 2023/24. The audit found all 28 of his shot rows join. Joined rows stay 315,073. |
+| F4 | `MIN_JOINED_ROWS` is now 315,073. The script now fails unless the Pool is 3,108 and the candidates are 3,136. #6 changes those two numbers when it runs the merges. |
+| F6 | "After the guard" under "Change from taking the club from rosters" now compares like with like. |
+| F7 | The opening line no longer claims every number comes from this report's output, and the run date is current. |
+| F8 | The 144 player-seasons have no FBref link. They were wrongly described as having no FBref id. |
+| F9 | **`merge_ids` today:** the script accepts the word in `review_decisions.csv`, prints the row as not applied, and applies nothing. The subject of `811d245`, "add merge_ids", overstates this. #6 applies it. |
+
+<details><summary>F3: the check script and its output</summary>
+
+```python
+"""Apply the plan's id merge in memory, then run scripts/measure_rule3.py unchanged. Run from the repo root, with a scratch folder as argument."""
+import contextlib, io, sys
+from pathlib import Path
+sys.path.insert(0, "scripts")
+import measure_rule3 as m
+
+m.ROOT = Path(sys.argv[1])
+m.SAMPLE_FILE = m.ROOT / "sample.csv"
+unmerged = m.load_positions
+
+def merged():
+    rows = unmerged()
+    for (league, year, team, player), part in rows.groupby(["league", "Season_End_Year", "Team", "Player"]):
+        ids = sorted(part["fbref_id"].unique())
+        matches = [set(part.loc[part["fbref_id"] == i, "match"]) for i in ids]
+        if len(ids) > 1 and sum(map(len, matches)) == len(set().union(*matches)):
+            print("merge", league, year, team, player, ids)
+            rows.loc[(rows["league"] == league) & (rows["Season_End_Year"] == year) & rows["fbref_id"].isin(ids), "fbref_id"] = ids[0]
+    return rows
+
+m.load_positions = merged
+out = io.StringIO()
+with contextlib.redirect_stdout(out), contextlib.suppress(SystemExit):
+    m.main()
+print("\n".join(line for line in out.getvalue().splitlines() if line.startswith(("merge", "After id collisions", "Pool until"))))
+with contextlib.redirect_stdout(io.StringIO()):
+    after = set(m.pool_candidates(merged()))
+print("new candidates:", sorted(after - set(m.pool_candidates(unmerged()))))
+```
+
+```
+merge FRA 2024 Marseille Abdoul Meité ['8eb68164', 'cb9ef70f']
+merge FRA 2024 Metz Joseph Nduquidi ['1d039497', 'f365b837']
+merge ITA 2024 Lecce Gabriel Strefezza ['674cfc5a', 'ac4a4508']
+After id collisions: 315073 (99.27%)
+Pool until Ahmed's review: 3109 of 3137 candidates
+new candidates: [('ITA', 2024, '674cfc5a')]
+```
+
+</details>
+
+**F10, changes no message or report had stated:**
+
+- `021e499` removed `minutes_check = approved` from the plan's `name_map.csv` line. The line now names only `minutes_check = none`, yet the 1,117 pairs still include Ezzalzouli, whose check is `approved`.
+- `approved_keys` in `scripts/measure_rule3.py` holds `approve` rows of both link item types, so an `approve` on a `name_map` key also approves a `season_anchor` link with the same key, and the reverse.
+- `read_review_decisions` reads with `utf-8-sig`, so a byte order mark from a spreadsheet save does not break the first column. The plan does not ask for this.
+
+**Listed limits, not fixed:**
+
+| Finding | Limit |
+|---|---|
+| F5 | Substitute detection has gaps, with 0 Pool flips across 3 separate repairs. `pool_candidates` combines both URLs of a match, which marks 4 players as substitutes when one URL alone would not, including Carlton Morris (90 minutes). The 305 off-roster names are F2 in the table above. |
+| F11 | The repo cannot prove "approved by Ahmed" (section 9, and row 1 of the review decisions, which arrived in `021e499`, co-authored by Claude). Ahmed can confirm. The fresh-venv run, mutation test, code-review log and the Caen and Udinese re-date checks were not re-run. |
+| F12 | Already disclosed: plan terms missing from `GLOSSARY.md`, `review_decisions.csv` outside `MANIFEST.md`, `approve` applied at the guard rather than after rule 3 (it changes exactly 30 rows, so no anchor spillover), and "plays once per season" holding only after the tie-breaker filter. `self_check` and `tests/test_measure_rule3.py` still leave most of the guard, the id collision rule, the date link and the decision reader without tests. |
 
 ## Joining shots to players, measured for #6
 
@@ -92,7 +167,7 @@ Pool candidates with shots: 3109 of 3136 (99.14%)
 Pool until Ahmed's review: 3108 of 3136 candidates
 ```
 
-- **Change from taking the club from rosters:** compared with the measurement in `03a9277`, which the script no longer reproduces, joined rows after the guard go from 314,630 to 314,844, and id collisions from 3 to 0. Luis Suárez ESP 2021/22, Raúl García ESP 2023/24 and Danilo ITA 2019/20 no longer collide.
+- **Change from taking the club from rosters:** compared with the measurement in `03a9277`, which the script no longer reproduces, joined rows after the guard go from 314,806 to 314,844, and id collisions from 3 to 0. Once collisions are removed, before season anchors, rows go from 314,630 to 314,844. Luis Suárez ESP 2021/22, Raúl García ESP 2023/24 and Danilo ITA 2019/20 no longer collide.
 - **`h_a` against the rosters, the outside check:** in only 4 shot groups (6 rows) is the name on the other club's roster and not on the `h_a` club's. All 4 are those former collisions, where FBref's name differs from the shot's: Luis Suárez at Granada (2 groups), Raul García at Osasuna and Danilo at Bologna. In these, `h_a` is right and the roster reading was wrong.
 - **Minutes guard:** the limit is the larger of 90 minutes or 10%.
   - **Not linked, 1:** André Anderson to Djavan Anderson, ITA 2019/20 (49 v 167, 1 row), a false link.
@@ -106,9 +181,9 @@ Pool until Ahmed's review: 3108 of 3136 candidates
   - **Not linked, 4 groups, 6 rows:** Chema Rodríguez ESP 2019/20 (2 rows) and 2020/21 (3 rows), and Tariqe Fosu-Henry ENG 2021/22 (1 row).
 - **`partial_join = yes`, 149 player-seasons:** counted per Understat `player_id`, over shot rows in linked matches.
   - **Some rows joined, 5, 25 unjoined rows:** Jeffinho FRA 2022/23 (1 of 10), Chema Rodríguez ESP 2019/20 (1 of 3), Rasmus Kristensen ITA 2023/24 (4 of 10), Randy Nteka ESP 2023/24 (8 of 15) and Dennis Johnsen ITA 2021/22 (14 of 15, 93.3%). Only Johnsen is a Pool candidate.
-  - **No rows joined, 144, 2,286 rows:** listed below. These have no FBref id at all, for example Isi Palazón, Ruslan Malinovskiy, Juan Camilo Hernández and Simy.
+  - **No rows joined, 144, 2,286 rows:** listed below. These have no FBref link, because none of their shot rows joined an FBref id, for example Isi Palazón, Ruslan Malinovskiy, Juan Camilo Hernández and Simy.
   - **Above the line, no flag:** Marc Cardona ESP 2023/24 has 21 of 22 rows joined (95.5%).
-  - **Pool candidates, 28, out of the Pool until Ahmed reviews them:** this leaves 3,108 of 3,136. They are Dennis Johnsen above and the 27 Pool candidates with no joined shots, which the plan's rule also flags because they hold no link to their Understat rows. They include Ruslan Malinovskyi, Isaac Palazón Camacho, Cucho and Javier Hernández. Some are the same people as the 144, seen from the FBref side, so the two counts do not add up to a total.
+  - **Pool candidates, 28, out of the Pool until Ahmed reviews them:** this leaves 3,108 of 3,136, before #6's id merges. They are Dennis Johnsen above and the 27 Pool candidates with no joined shots, which the plan's rule also flags because they hold no link to their Understat rows. They include Ruslan Malinovskyi, Isaac Palazón Camacho, Cucho and Javier Hernández. Some are the same people as the 144, seen from the FBref side, so the two counts do not add up to a total.
 - **One Understat id on 2+ FBref ids:** Joseph N'Duquidi FRA 2023/24 and Gabriel Strefezza ITA 2023/24. These are the known two-id players that the plan's id merge handles.
 - **Still unjoined:** 2,312 rows. The largest are Ruslan Malinovskiy (261 rows in ITA), Isi Palazón (224), Juan Camilo Hernández (153), Simy (128) and Silas Wamangituka (112). 27 Pool candidates have no joined shots, for example Javier Hernández ("Chicharito"), Cucho and Silas Katompa.
 - **Named cases:** Raul García 8042 to FBref's Raúl `18f0a9f0`; Raúl García 5114 to `1a317a1b`; Bruno 2302 to Bruno Soriano `09332647`; Ousmane Camara 11016 to `7d3dfdfd` and 11249 to `5a6b06cd`; Luis Suárez 2098 to `a6154613` and 8978 to Luis Javier Suárez `eeba07f8`; Danilo 2244 to `94b2001f` and 1140 to Danilo Larangeira `fed5f993`.

@@ -5,9 +5,11 @@ Usage: python3 scripts/measure_rule3.py
 Prints the join table, the minutes guard results, the season anchors, the partial joins and the id collisions, with the
 checks behind them. Writes a fixed
 random sample of the name map to docs/reports/name_map_sample.csv. Reads data/standin only, makes no network calls, and
-the same files give identical output. Of review_decisions.csv it applies only `approve` on a link, at the guard. It prints
-any other row as not applied, and stops on a stale key. Exits non-zero if a check at the end fails. Measured before any FBref id merges,
-because #6 owns those. The plan runs the guard after them.
+the same files give identical output. Of review_decisions.csv it applies only `approve` on a link, at the guard, and only
+that row stops on a stale key. It prints any other row as not applied. read_review_decisions adds two stops, on an unknown
+value and on two rows with one key. All the plan's other stops are #6 work.
+Exits non-zero if a check at the end fails. Measured before any FBref id merges, because #6 owns those. The plan runs the
+guard after them.
 """
 import csv
 import html
@@ -41,7 +43,9 @@ NAMED_CASES = (
     ("ESP", 2018, 5114), ("ESP", 2019, 2302), ("FRA", 2022, 11016), ("FRA", 2022, 11249),
     ("ESP", 2021, 2098), ("ESP", 2021, 8978), ("ESP", 2023, 2400), ("ESP", 2023, 8042), ("ITA", 2019, 1140), ("ITA", 2019, 2244),
 )
-MIN_JOINED_ROWS = 314_843
+MIN_JOINED_ROWS = 315_073
+# With the current review_decisions.csv, before #6's FBref id merges, which give 3,109 of 3,137. A new `approve` can move them.
+EXPECTED_POOL, EXPECTED_CANDIDATES = 3_108, 3_136
 MIN_ANCHOR_MATCHES = 2
 FULL_JOIN_PERCENT = 95
 
@@ -80,7 +84,7 @@ def decision_key(pair):
 
 
 def read_review_decisions():
-    """Every row of the review decisions file. Stops on a value the plan does not allow, or on two rows with one key."""
+    """Every row of the review decisions file. Stops on an unknown item_type or decision, or on two rows with one key. The plan's `fbref_id` stops are #6 work."""
     # utf-8-sig: spreadsheets save this hand-edited file with a byte order mark.
     with DECISIONS_FILE.open(encoding="utf-8-sig", newline="") as handle:
         decisions = list(csv.DictReader(handle))
@@ -570,7 +574,8 @@ def main():
     no_shots = sorted((key[0], key[1], names[key[2]]) for key in pool if key not in with_shots)
     print(f"\nPool candidates with shots: {len(pool) - len(no_shots)} of {len(pool)} ({100 * (len(pool) - len(no_shots)) / len(pool):.2f}%)")
     print(f"No joined shots, so partial_join = yes: {len(no_shots)}: {no_shots}")
-    print(f"Pool until Ahmed's review: {len(pool) - len(no_shots) - len(pool_partly_joined)} of {len(pool)} candidates")
+    pool_count = len(pool) - len(no_shots) - len(pool_partly_joined)
+    print(f"Pool until Ahmed's review: {pool_count} of {len(pool)} candidates")
 
     final_pairs = {pair_of[group] for group, link in final.items() if link[0] == "map"}
     sampled = write_sample(final_pairs, guard, names, name_map_rows, matches_of)
@@ -580,6 +585,8 @@ def main():
     checks = {
         "no id collisions": not collisions,
         f"at least {MIN_JOINED_ROWS} rows joined": count(final) >= MIN_JOINED_ROWS,
+        f"Pool is {EXPECTED_POOL}": pool_count == EXPECTED_POOL,
+        f"candidates are {EXPECTED_CANDIDATES}": len(pool) == EXPECTED_CANDIDATES,
         "Ezzalzouli approved": any(pair.name == "Abdessamad Ezzalzouli" and result[0] == "approved" for pair, result in guard.items()),
         f"sample holds {SAMPLE_SIZE} rows": sampled == SAMPLE_SIZE,
     }
