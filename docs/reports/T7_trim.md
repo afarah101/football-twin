@@ -44,7 +44,7 @@ Run date: 2026-11-03. Issue: #7. Repo position at the first trim: `39b1c3a`, lev
 4. Majority `Pos`. The trim applies it, because `data/standin/` holds one `Pos` per row and #6 would have nothing to count. Each row records `Pos_Files_Voted` and `Pos_Tie`.
 5. #6 re-cuts `tests/fixtures/standin/` from `data/standin/`. Those fixtures still hold the original schema.
 
-**Open for Ahmed:** the 50 pairs in `docs/reports/name_map_sample.csv`, and the `partial_join` player-seasons under "Joining shots to players". Decisions go in `data/standin/review_decisions.csv`, which the plan's rule 3 defines. Row 1 is the Ezzalzouli approval. `scripts/measure_rule3.py` does not read the file, so its numbers are before any decisions, except that it holds the same approval as a constant.
+**Open for Ahmed:** the 50 pairs in `docs/reports/name_map_sample.csv`, and the `partial_join` player-seasons under "Joining shots to players". Decisions go in `data/standin/review_decisions.csv`, which the plan's rule 3 defines. Row 1 is the Ezzalzouli approval. `scripts/measure_rule3.py` reads the file. It applies only `approve` on a link, at the guard rather than after rule 3, so its "After the minutes guard" line already holds the 30 Ezzalzouli rows. It prints any other row as not applied, so its numbers are otherwise before the decisions.
 
 ## Known limits, from the audit of `6666192`
 

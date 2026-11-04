@@ -5,7 +5,8 @@ Usage: python3 scripts/measure_rule3.py
 Prints the join table, the minutes guard results, the season anchors, the partial joins and the id collisions, with the
 checks behind them. Writes a fixed
 random sample of the name map to docs/reports/name_map_sample.csv. Reads data/standin only, makes no network calls, and
-the same files give identical output. Exits non-zero if a check at the end fails. Measured before any FBref id merges,
+the same files give identical output. Of review_decisions.csv it applies only `approve` on a link, at the guard. It prints
+any other row as not applied, and stops on a stale key. Exits non-zero if a check at the end fails. Measured before any FBref id merges,
 because #6 owns those. The plan runs the guard after them.
 """
 import csv
@@ -31,8 +32,10 @@ POOL_FIRST_SEASON, POOL_LAST_SEASON = 2017, 2023
 MAX_LINK_GAP_DAYS = 14
 FOLDED_LETTERS = str.maketrans({"ø": "o", "ð": "d", "đ": "dj", "ı": "i", "ł": "l", "ß": "ss", "æ": "ae", "œ": "oe", "þ": "th"})
 ATTACKING_POS = {"FW", "LW", "RW", "AM"}
-# Approved by Ahmed: FBref uses both spellings that season, and the other 8 shot rows join the same id by exact name.
-APPROVED_LINKS = {("ESP", 2023, 10095, "Abdessamad Ezzalzouli", "bed68338")}
+DECISIONS_FILE = DATA / "review_decisions.csv"
+LINK_ITEM_TYPES = {"name_map", "season_anchor"}
+ITEM_TYPES = LINK_ITEM_TYPES | {"partial_join", "pool_candidate"}
+DECISIONS = {"approve", "reject", "link_to", "merge_ids"}
 # League, Understat season and player_id of the cases the plan asks about, and the former collisions.
 NAMED_CASES = (
     ("ESP", 2018, 5114), ("ESP", 2019, 2302), ("FRA", 2022, 11016), ("FRA", 2022, 11249),
@@ -69,6 +72,25 @@ class PlayerSeasonName(NamedTuple):
     understat_id: int
     name: str
     fbref_id: str
+
+
+def decision_key(pair):
+    """The key review_decisions.csv uses for a name_map or season_anchor link."""
+    return f"{pair.league}|{pair.season}|{pair.understat_id}|{html.unescape(pair.name)}|{pair.fbref_id}"
+
+
+def read_review_decisions():
+    """Every row of the review decisions file. Stops on a value the plan does not allow, or on two rows with one key."""
+    # utf-8-sig: spreadsheets save this hand-edited file with a byte order mark.
+    with DECISIONS_FILE.open(encoding="utf-8-sig", newline="") as handle:
+        decisions = list(csv.DictReader(handle))
+    for row in decisions:
+        if row["item_type"] not in ITEM_TYPES or row["decision"] not in DECISIONS:
+            raise SystemExit(f"{DECISIONS_FILE.name}: unknown item_type or decision: {row}")
+    repeated = sorted(key for key, count in Counter((row["item_type"], row["key"]) for row in decisions).items() if count > 1)
+    if repeated:
+        raise SystemExit(f"{DECISIONS_FILE.name}: two rows on one key: {repeated}")
+    return decisions
 
 
 def compared_name(name):
@@ -264,7 +286,7 @@ def season_minutes_by_name(clubs):
     return index
 
 
-def minutes_guard(name_map_rows, understat_minutes, fbref_minutes, clubs_of_player):
+def minutes_guard(name_map_rows, understat_minutes, fbref_minutes, clubs_of_player, approved_keys):
     """One verdict per name map player-season: agree, disagree, approved or none."""
     results = {}
     for pair in sorted(name_map_rows):
@@ -277,7 +299,7 @@ def minutes_guard(name_map_rows, understat_minutes, fbref_minutes, clubs_of_play
             continue
         understat = sum(option[1] for option in options)
         within = abs(understat - fbref) <= minutes_limit(understat, fbref)
-        results[pair] = ("agree" if within else "approved" if pair in APPROVED_LINKS else "disagree", understat, fbref)
+        results[pair] = ("agree" if within else "approved" if decision_key(pair) in approved_keys else "disagree", understat, fbref)
     return results
 
 
@@ -338,6 +360,7 @@ def self_check():
     assert is_name_map_candidate(["kylian", "mbappe", "lottin"], ["kylian", "mbappe"])
     assert not is_name_map_candidate(["bruno"], ["brunos", "fernandes"])
     assert abs(minutes_limit(839, 933) - 93.3) < 1e-9 and minutes_limit(49, 167) == 90
+    assert decision_key(PlayerSeasonName("ESP", 2023, 10095, "N&#039;Golo", "bed68338")) == "ESP|2023|10095|N'Golo|bed68338"
     shot = lambda match, understat_id=1, club="A": ShotGroup("ESP", 2021, match, understat_id, "Kike", club)
     two_other = {shot("m1"): ("map", "x"), shot("m2"): ("map", "x")}
     assert season_anchor_links({shot("m3"): {"x", "y"}}, two_other)[0] == {shot("m3"): "x"}
@@ -383,7 +406,9 @@ def main():
         name_map_rows[pair] += rows_of[group]
         matches_of[pair] += 1
     understat_minutes = season_minutes_by_name(clubs)
-    guard = minutes_guard(name_map_rows, understat_minutes, fbref_minutes, clubs_of_player)
+    decisions = read_review_decisions()
+    approved_keys = {row["key"] for row in decisions if row["decision"] == "approve" and row["item_type"] in LINK_ITEM_TYPES}
+    guard = minutes_guard(name_map_rows, understat_minutes, fbref_minutes, clubs_of_player, approved_keys)
     after_guard = {group: link for group, link in after_step_2.items() if link[0] != "map" or guard[pair_of[group]][0] != "disagree"}
     anchored, anchor_stopped = season_anchor_links(undecided, after_guard)
     anchor_pair_of = {group: PlayerSeasonName(group.league, group.season, group.understat_id, group.name, fbref_id) for group, fbref_id in anchored.items()}
@@ -391,7 +416,14 @@ def main():
     for group, pair in anchor_pair_of.items():
         anchor_rows[pair] += rows_of[group]
         anchor_matches[pair] += 1
-    anchor_guard = minutes_guard(anchor_rows, understat_minutes, fbref_minutes, clubs_of_player)
+    anchor_guard = minutes_guard(anchor_rows, understat_minutes, fbref_minutes, clubs_of_player, approved_keys)
+    keys_of_type = {"name_map": {decision_key(pair) for pair in guard}, "season_anchor": {decision_key(pair) for pair in anchor_guard}}
+    stale = [row for row in decisions if row["decision"] == "approve" and row["item_type"] in LINK_ITEM_TYPES and row["key"] not in keys_of_type[row["item_type"]]]
+    if stale:
+        raise SystemExit(f"{DECISIONS_FILE.name}: stale decisions, key not in the data: {stale}")
+    not_applied = [row for row in decisions if row["decision"] != "approve" or row["item_type"] not in LINK_ITEM_TYPES]
+    if not_applied:
+        print(f"Review decisions this script does not apply, so #6's numbers will differ: {not_applied}")
     after_anchor = {**after_guard, **{group: ("season_anchor", fbref_id) for group, fbref_id in anchored.items()}}
     after_anchor_guard = {group: link for group, link in after_anchor.items() if link[0] != "season_anchor" or anchor_guard[anchor_pair_of[group]][0] != "disagree"}
     collisions = id_collisions(after_anchor_guard)
@@ -548,7 +580,7 @@ def main():
     checks = {
         "no id collisions": not collisions,
         f"at least {MIN_JOINED_ROWS} rows joined": count(final) >= MIN_JOINED_ROWS,
-        "Ezzalzouli approved": verdicts["approved"] == 1 and all(guard[pair][0] == "approved" for pair in APPROVED_LINKS),
+        "Ezzalzouli approved": any(pair.name == "Abdessamad Ezzalzouli" and result[0] == "approved" for pair, result in guard.items()),
         f"sample holds {SAMPLE_SIZE} rows": sampled == SAMPLE_SIZE,
     }
     for label, passed_check in checks.items():
