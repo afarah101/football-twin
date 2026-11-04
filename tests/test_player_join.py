@@ -594,7 +594,7 @@ class StageBNameSteps(unittest.TestCase):
         self.assertEqual(len(other_matches), 1)
         # The id is a candidate, so only the count of other matches keeps this group from anchoring.
         self.assertIn(next(iter(other_matches.values())), sample_name_map().undecided[group])
-        self.assertEqual(sample_anchors().stopped["under 2 other matches"], 1)
+        self.assertEqual(join.season_anchor_links({group: sample_name_map().undecided[group]}, linked).stopped["under 2 other matches"], 1)
 
     def test_b_anchor_needs_links_for_that_club(self):
         group = sample_groups_of("ENG", 2021, 10092, "c8c7dd9b")[0]
