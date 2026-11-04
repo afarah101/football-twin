@@ -44,7 +44,7 @@ Run date: 2026-11-03. Issue: #7. Repo position at the first trim: `39b1c3a`, lev
 4. Majority `Pos`. The trim applies it, because `data/standin/` holds one `Pos` per row and #6 would have nothing to count. Each row records `Pos_Files_Voted` and `Pos_Tie`.
 5. #6 re-cuts `tests/fixtures/standin/` from `data/standin/`. Those fixtures still hold the original schema.
 
-**Open for Ahmed:** the club map review in section 9, the 50 pairs in `docs/reports/name_map_sample.csv`, and the 20 partly joined player-seasons under "Joining shots to players".
+**Open for Ahmed:** the club map review in section 9, the 50 pairs in `docs/reports/name_map_sample.csv`, and the `partial_join` player-seasons under "Joining shots to players".
 
 ## Known limits, from the audit of `6666192`
 
@@ -71,21 +71,27 @@ Exact: 262838 (82.81%)
 After step 1: 295066 (92.97%)
 After step 2: 314845 (99.20%)
 After the minutes guard: 314844 (99.20%)
-After id collisions: 314844 (99.20%)
-Unjoined: 2541
-ENG: exact 90.47 / step 1 97.19 / step 2 99.62 / final 99.62
-ESP: exact 80.38 / step 1 87.17 / step 2 98.35 / final 98.35
-FRA: exact 75.65 / step 1 88.83 / step 2 99.41 / final 99.41
+After season anchors: 315073 (99.27%)
+After the guard on anchors: 315073 (99.27%)
+After id collisions: 315073 (99.27%)
+Unjoined: 2312
+ENG: exact 90.47 / step 1 97.19 / step 2 99.62 / final 99.65
+ESP: exact 80.38 / step 1 87.17 / step 2 98.35 / final 98.60
+FRA: exact 75.65 / step 1 88.83 / step 2 99.41 / final 99.49
 GER: exact 87.62 / step 1 95.81 / step 2 99.60 / final 99.60
 ITA: exact 80.01 / step 1 95.43 / step 2 99.06 / final 99.05
 Name map player-seasons 1118, rows 19779 | {'agree': 1109, 'approved': 1, 'disagree': 1, 'none': 7}
 Keep their link: 1117 player-seasons, 19778 rows
 Wrong same-club players who would pass the limit: 3104 of 32474 (9.6%)
+2+ candidate groups 109, rows 235 | linked groups 105, rows 229
+Guard on 14 anchor player-seasons: {'agree': 14}
+Partly joined before anchors: 20, holding 255 unjoined rows | now fully joined 14 | still partly joined 6, holding 26 unjoined rows
+partial_join = yes: 149 player-seasons | some rows joined 5, holding 25 unjoined rows | no rows joined 144, holding 2286 rows
 Collisions: 0
 Pool candidates with shots: 3109 of 3136 (99.14%)
 ```
 
-- **Change from taking the club from rosters:** compared with the measurement in `03a9277`, which the script no longer reproduces, joined rows go from 314,630 to 314,844, and id collisions from 3 to 0. Luis Suárez ESP 2021/22, Raúl García ESP 2023/24 and Danilo ITA 2019/20 no longer collide.
+- **Change from taking the club from rosters:** compared with the measurement in `03a9277`, which the script no longer reproduces, joined rows after the guard go from 314,630 to 314,844, and id collisions from 3 to 0. Luis Suárez ESP 2021/22, Raúl García ESP 2023/24 and Danilo ITA 2019/20 no longer collide.
 - **`h_a` against the rosters, the outside check:** in only 4 shot groups (6 rows) is the name on the other club's roster and not on the `h_a` club's. All 4 are those former collisions, where FBref's name differs from the shot's: Luis Suárez at Granada (2 groups), Raul García at Osasuna and Danilo at Bologna. In these, `h_a` is right and the roster reading was wrong.
 - **Minutes guard:** the limit is the larger of 90 minutes or 10%.
   - **Not linked, 1:** André Anderson to Djavan Anderson, ITA 2019/20 (49 v 167, 1 row), a false link.
@@ -93,10 +99,169 @@ Pool candidates with shots: 3109 of 3136 (99.14%)
   - **`minutes_check = none`, 7:** all Sehrou Guirassy, whom the season file spells Serhou, on 298 rows.
   - **What the guard cannot catch:** tried against every other same-club player, 9.6% of wrong pairs still pass the limit. It is a filter, not proof.
 - **Sample for Ahmed's check:** `docs/reports/name_map_sample.csv` holds 50 of the 1,117 pairs, drawn with a fixed seed. Pairs are drawn equally, so a pair with 1 shot row counts as much as one with 61.
-- **Partly joined player-seasons, open:** 20 player-seasons hold both joined and unjoined rows, with 255 rows unjoined: 231 with 2+ candidates and 24 with no candidate, so the rule does not link. Their shot totals run short. The largest are Mama Baldé FRA 2022/23 (28 joined, 47 not), Kike García ESP 2017/18 (33, 37), 2022/23 (9, 33) and 2021/22 (24, 30), and Raul García ESP 2023/24 (5, 28). The rule does not settle these.
+- **Season anchors, step 3:** 229 rows gained, on 105 shot groups and 14 player-seasons. 14 of the 20 partly joined player-seasons are now fully joined, and all 14 agree with the guard.
+  - **What they rest on:** all 14 player-seasons are anchored on `name_match = map` links, not exact ones. A wrong map link with 2+ matches would spread, and the guard is the only check on that.
+  - **Club check:** 0 links where `h_a` disagrees with the club, but that holds by construction, because the club comes from `h_a` and anchors stay inside it. The separate checks also find 0: no link has a player without minutes in that match, and no link's club is missing from the Understat season file's team list.
+  - **Not linked, 4 groups, 6 rows:** Chema Rodríguez ESP 2019/20 (2 rows) and 2020/21 (3 rows), and Tariqe Fosu-Henry ENG 2021/22 (1 row).
+- **`partial_join = yes`, 149 player-seasons:** counted per Understat `player_id`, over shot rows in linked matches.
+  - **Some rows joined, 5, 25 unjoined rows:** Jeffinho FRA 2022/23 (1 of 10), Chema Rodríguez ESP 2019/20 (1 of 3), Rasmus Kristensen ITA 2023/24 (4 of 10), Randy Nteka ESP 2023/24 (8 of 15) and Dennis Johnsen ITA 2021/22 (14 of 15, 93.3%). Only Johnsen is a Pool candidate.
+  - **No rows joined, 144, 2,286 rows:** listed below. These have no FBref id at all, for example Isi Palazón, Ruslan Malinovskiy, Juan Camilo Hernández and Simy.
+  - **Above the line, no flag:** Marc Cardona ESP 2023/24 has 21 of 22 rows joined (95.5%).
+  - **Pool candidates, 28:** Dennis Johnsen above, and the 27 Pool candidates with no joined shots, which the plan's rule also flags because they hold no link to their Understat rows. They include Ruslan Malinovskyi, Isaac Palazón Camacho, Cucho and Javier Hernández. Some are the same people as the 144, seen from the FBref side, so the two counts do not add up to a total.
 - **One Understat id on 2+ FBref ids:** Joseph N'Duquidi FRA 2023/24 and Gabriel Strefezza ITA 2023/24. These are the known two-id players that the plan's id merge handles.
-- **Still unjoined:** 2,541 rows. The largest are Ruslan Malinovskiy (261 rows in ITA), Isi Palazón (224), Juan Camilo Hernández (153), Simy (128) and Kike García (119). 27 Pool candidates have no shots, for example Javier Hernández ("Chicharito"), Cucho and Silas Katompa.
-- **Named cases:** Raúl García 5114 to `1a317a1b`; Bruno 2302 to Bruno Soriano `09332647`; Ousmane Camara 11016 to `7d3dfdfd` and 11249 to `5a6b06cd`; Luis Suárez 2098 to `a6154613` and 8978 to Luis Javier Suárez `eeba07f8`; Danilo 2244 to `94b2001f` and 1140 to Danilo Larangeira `fed5f993`.
+- **Still unjoined:** 2,312 rows. The largest are Ruslan Malinovskiy (261 rows in ITA), Isi Palazón (224), Juan Camilo Hernández (153), Simy (128) and Silas Wamangituka (112). 27 Pool candidates have no joined shots, for example Javier Hernández ("Chicharito"), Cucho and Silas Katompa.
+- **Named cases:** Raul García 8042 to FBref's Raúl `18f0a9f0`; Raúl García 5114 to `1a317a1b`; Bruno 2302 to Bruno Soriano `09332647`; Ousmane Camara 11016 to `7d3dfdfd` and 11249 to `5a6b06cd`; Luis Suárez 2098 to `a6154613` and 8978 to Luis Javier Suárez `eeba07f8`; Danilo 2244 to `94b2001f` and 1140 to Danilo Larangeira `fed5f993`.
+
+<details><summary>The 144 player-seasons with no rows joined: league, Understat season, id, name, rows, Understat minutes</summary>
+
+```
+ESP 2022 9812 ['Isi Palazón'] 94 3041
+ESP 2018 6954 ['Juan Camilo Hernández'] 80 2171
+ITA 2019 7947 ['Ruslan Malinovskiy'] 79 1500
+ESP 2023 9812 ['Isi Palazón'] 72 2854
+ITA 2020 7947 ['Ruslan Malinovskiy'] 67 1896
+ITA 2020 1362 ['Simy'] 64 2935
+ESP 2021 9812 ['Isi Palazón'] 58 2330
+ITA 2021 7947 ['Ruslan Malinovskiy'] 57 1594
+ITA 2022 6434 ['Franck Zambo'] 50 3077
+FRA 2023 11782 ['Mousa Al Tamari'] 47 1969
+ESP 2019 6954 ['Juan Camilo Hernández'] 45 1506
+GER 2020 8807 ['Silas Wamangituka'] 45 1949
+ESP 2023 11322 ['Viktor Tsygankov'] 44 2118
+ESP 2023 12305 ['Isaac Romero'] 42 1079
+GER 2022 8807 ['Silas Wamangituka'] 42 2020
+ITA 2023 7947 ['Ruslan Malinovskiy'] 39 1551
+ENG 2018 191 ['Chicharito'] 37 1336
+GER 2023 3682 ['Jordan Siebatcheu'] 36 1475
+ESP 2023 2551 ['Pepelu'] 35 3314
+ENG 2020 6434 ['Franck Zambo'] 34 2582
+ENG 2021 6954 ['Juan Camilo Hernández'] 34 1125
+FRA 2017 6434 ['Franck Zambo'] 34 2429
+FRA 2022 7947 ['Ruslan Malinovskiy'] 34 1242
+GER 2022 3682 ['Jordan Siebatcheu'] 34 1336
+ITA 2023 6434 ['Franck Zambo'] 33 2793
+ESP 2020 8933 ['Marcos de Sousa'] 32 1159
+ESP 2022 8461 ['Nicolás Melamed'] 32 1254
+ITA 2017 1362 ['Simy'] 31 1199
+ESP 2019 6434 ['Franck Zambo'] 30 2582
+ESP 2021 8933 ['Marcos de Sousa'] 30 933
+ENG 2017 191 ['Chicharito'] 29 1524
+ESP 2020 6954 ['Juan Camilo Hernández'] 28 1479
+ITA 2022 3785 ['Kelvin Adou'] 26 2374
+ITA 2021 3785 ['Kelvin Adou'] 25 2656
+GER 2023 8807 ['Silas Wamangituka'] 24 861
+FRA 2021 5773 ['Zaydou Youssef'] 22 1566
+ENG 2018 6434 ['Franck Zambo'] 21 1515
+ITA 2019 1927 ['Berat Gjimshiti'] 21 2800
+ITA 2020 1927 ['Berat Gjimshiti'] 21 2623
+ESP 2021 8461 ['Nicolás Melamed'] 20 1058
+ESP 2022 11322 ['Viktor Tsygankov'] 20 1501
+FRA 2018 3682 ['Jordan Siebatcheu'] 20 605
+ITA 2021 1362 ['Simy'] 20 839
+ITA 2021 6434 ['Franck Zambo'] 20 1915
+ITA 2022 7947 ['Ruslan Malinovskiy'] 19 525
+ESP 2023 8410 ['Rodrigo Sánchez'] 18 988
+FRA 2018 3785 ['Kelvin Adou'] 18 2880
+ESP 2022 8933 ['Marcos de Sousa'] 17 416
+ESP 2023 11746 ['Pejiño'] 17 489
+ITA 2021 1927 ['Berat Gjimshiti'] 17 2250
+ESP 2021 8410 ['Rodrigo Sánchez'] 15 884
+ESP 2022 8410 ['Rodrigo Sánchez'] 15 1625
+FRA 2017 3785 ['Kelvin Adou'] 15 3155
+FRA 2020 5773 ['Zaydou Youssef'] 15 1219
+ENG 2017 3979 ['Ahmed Hegazy'] 14 3389
+ESP 2021 2551 ['Pepelu'] 14 1998
+FRA 2021 9661 ['Igor Silva'] 14 1567
+ENG 2017 6030 ['Zanka'] 13 3420
+ENG 2022 10750 ['Rasmus Kristensen'] 13 1964
+ESP 2019 191 ['Chicharito'] 13 452
+ITA 2023 1362 ['Simy'] 13 679
+ITA 2023 1927 ['Berat Gjimshiti'] 13 2829
+FRA 2021 10387 ['Danylo Ignatenko'] 12 683
+ENG 2023 11772 ['Yehor Yarmolyuk'] 11 619
+FRA 2023 11399 ['Jeffinho'] 11 293
+ITA 2018 1927 ['Berat Gjimshiti'] 11 1804
+FRA 2019 3682 ['Jordan Siebatcheu'] 10 429
+ITA 2017 1927 ['Berat Gjimshiti'] 9 2700
+ENG 2018 6030 ['Zanka'] 8 2151
+ENG 2023 6030 ['Zanka'] 8 1082
+FRA 2019 3785 ['Kelvin Adou'] 8 1625
+FRA 2019 5773 ['Zaydou Youssef'] 8 1063
+ESP 2023 10576 ['Álvaro Fernández'] 7 452
+ENG 2022 6030 ['Zanka'] 6 1082
+ESP 2022 7981 ['Nianzou Kouassi'] 6 1370
+ESP 2022 11121 ['Nicolás Fernández Mercau'] 6 451
+FRA 2018 5773 ['Zaydou Youssef'] 6 439
+FRA 2023 9317 ['Oussama Targhaline'] 6 1053
+GER 2021 7981 ['Nianzou Kouassi'] 6 569
+GER 2022 9704 ['Vasilios Lampropoulos'] 6 618
+ENG 2020 8723 ['Ian Poveda-Ocampo'] 5 322
+ESP 2020 8410 ['Rodrigo Sánchez'] 5 527
+ESP 2023 7226 ['Chumi'] 5 2427
+FRA 2023 11763 ['Abduqodir Khusanov'] 5 819
+GER 2021 9704 ['Vasilios Lampropoulos'] 5 1170
+GER 2023 9714 ['Odilon Kossounou'] 5 1822
+ITA 2019 7941 ['André Anderson'] 5 49
+ESP 2019 8461 ['Nicolás Melamed'] 4 178
+ESP 2021 5198 ['Martín Aguirregabiria'] 4 1624
+ESP 2023 10981 ['Malcom Adu'] 4 238
+FRA 2022 9661 ['Igor Silva'] 4 455
+FRA 2022 10830 ['Jean Négoce'] 4 254
+GER 2021 9714 ['Odilon Kossounou'] 4 1787
+ITA 2022 1927 ['Berat Gjimshiti'] 4 1791
+ITA 2023 12341 ['Lautaro Giannetti'] 4 630
+ENG 2019 191 ['Chicharito'] 3 107
+ESP 2017 5198 ['Martín Aguirregabiria'] 3 1828
+ESP 2019 5198 ['Martín Aguirregabiria'] 3 2090
+ESP 2019 7780 ['Gaizka Larrazabal'] 3 243
+ESP 2019 8353 ['Antoñin'] 3 168
+ESP 2020 2350 ['Cifuentes'] 3 436
+ESP 2020 5124 ['Alberto Rodríguez'] 3 851
+ESP 2020 6216 ['Chema Rodríguez'] 3 552
+ESP 2022 7226 ['Chumi'] 3 1481
+FRA 2017 5773 ['Zaydou Youssef'] 3 125
+GER 2021 6595 ['Paul Jäckel'] 3 2044
+GER 2021 10363 ['Dong-Jun Lee'] 3 113
+GER 2022 9714 ['Odilon Kossounou'] 3 1518
+ITA 2022 10938 ['Emanuel Aiwu'] 3 1637
+ITA 2023 12380 ['Dani Silva'] 3 415
+ENG 2021 6030 ['Zanka'] 2 514
+ESP 2018 2574 ['Miguelón'] 2 544
+ESP 2018 6120 ['Bono'] 2 2864
+ESP 2020 5198 ['Martín Aguirregabiria'] 2 1547
+ESP 2020 6120 ['Bono'] 2 2970
+ESP 2020 9170 ['John Finn'] 2 54
+ESP 2021 7251 ['Robert'] 2 124
+ESP 2021 9918 ['Alex Petxarromán'] 2 369
+ESP 2022 10981 ['Malcom Adu'] 2 68
+ESP 2022 11186 ['Alvaro Rodríguez'] 2 69
+ESP 2023 12139 ['Yarek Gasiorowski'] 2 714
+FRA 2019 7981 ['Nianzou Kouassi'] 2 454
+GER 2017 6595 ['Paul Jäckel'] 2 270
+GER 2022 6595 ['Paul Jäckel'] 2 1204
+ENG 2021 10092 ['Tariqe Fosu-Henry'] 1 15
+ESP 2018 5198 ['Martín Aguirregabiria'] 1 2036
+ESP 2020 9457 ['José Boacho'] 1 21
+ESP 2021 9268 ['Koffi'] 1 70
+ESP 2021 10155 ['Rubén Iranzo'] 1 132
+ESP 2022 11266 ['Manu Bueno'] 1 151
+ESP 2022 11419 ['Jorge Pascual'] 1 5
+ESP 2023 7981 ['Nianzou Kouassi'] 1 309
+ESP 2023 11266 ['Manu Bueno'] 1 114
+ESP 2023 11503 ['Marciano Sanca'] 1 24
+ESP 2023 11834 ['Adrià Alti'] 1 792
+ESP 2023 12197 ['Rachad Dhimi'] 1 13
+FRA 2023 3785 ['Kelvin Adou'] 1 813
+FRA 2023 9661 ['Igor Silva'] 1 251
+FRA 2023 12004 ['Joel Mvuka'] 1 189
+GER 2018 7436 ['Alfons Amade'] 1 4
+GER 2019 6030 ['Zanka'] 1 489
+GER 2021 8807 ['Silas Wamangituka'] 1 265
+ITA 2018 5195 ['Nicolás Schiappacase'] 1 82
+ITA 2021 7941 ['André Anderson'] 1 56
+```
+
+</details>
 
 ## Re-trim with `h_a` and `home_away`, 2026-11-04
 
