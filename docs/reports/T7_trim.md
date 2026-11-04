@@ -195,7 +195,7 @@ Pool until Ahmed's review: 3099 of 3136 candidates
 - F7: Some report claims are not reproducible from the repo: Ahmed's approvals (club map, row 1), the re-date checks, the code review log, the t7_verify.py comparison and the planted-fault run.
 - F9: Substitute detection has gaps: 305 of 91,589 events match no roster name, and 4 players are marked as substitutes through two-URL matches (including Carlton Morris, 90 minutes). 0 Pool flips.
 - F10: Plan terms are missing from GLOSSARY.md, including partial_join and name_match. Left for #6.
-- The 2+ match rules in exact, step 1 and step 2 (plan:130-131) have 0 real cases and no test. #6 ticket 1 must test every rule 3 clause in the new join module.
+- The 2+ roster matches clauses (exact and step 1, plan:130) have 0 real cases and no test. The 2+ candidates rule in step 2 is separate: it has 109 real groups and the Chema test. #6 ticket 1 must test every rule 3 clause in the new join module.
 
 ## Joining shots to players, measured for #6
 

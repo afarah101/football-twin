@@ -144,7 +144,12 @@ These also override earlier decisions where they differ.
     - A `pool_candidate` that goes back in the Pool with no joined shots stops #6 with an error, because its shot metrics would read as zero. Its shots need a `partial_join` row with `link_to`. A decision that puts two Understat ids on one FBref id is applied only with `merge_ids`, and the #6 report lists it. With `link_to` or `approve`, #6 stops with an error that names both ids. #6 checks this after applying every row, so row order never changes the result.
     - After the decisions, #6 works out `partial_join` again, so a player-season at 95% or above loses the flag. A `reject` on a `partial_join` or `pool_candidate` keeps it flagged.
     - The #6 report shows the Pool count before and after the decisions.
-  - Acceptance check: #6 ticket 1 must test every rule 3 clause in the new join module.
+  - Acceptance check: #6 ticket 1 must test every rule 3 clause in the new join module, including the 2+ roster matches clauses (exact and step 1), which have 0 real cases and no test. The 2+ candidates rule in step 2 is separate: it has 109 real groups and the Chema test.
+  - Open questions for #6 ticket 1, from the last code review. Each affects 0 cases today:
+    - A step 2 link stopped by the 2+ FBref ids rule has no review route. `approve` on its key stops as stale, and the stale decisions rule does not name this stop.
+    - "Left to the id merges" in step 2 overstates the rule for two ids with different names. The merge needs the same name, team and season, so those two ids stay unmerged.
+    - `scripts/measure_rule3.py` stops links before the merges, but #6 merges first, so the two can differ for a two-id player with a step 2 link.
+    - The stop does not reach step 3 season anchors. A stopped player-season can still gain a `season_anchor` link to its remaining exact id.
   - The #6 report gives the join rate in 3 steps: exact, after step 1, after step 2. It then gives the rate after the guard, after step 3 and its guard, and after the id collision rule. Rows still unjoined are counted per league-season. It also says how Raúl García 2018/19 (id 5114), Bruno 2019/20 (id 2302) and Ousmane Camara 2022/23 (ids 11016 and 11249) resolved, for Ahmed's review.
 
 ### Site and code
