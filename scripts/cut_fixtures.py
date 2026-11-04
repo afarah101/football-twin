@@ -10,6 +10,7 @@ SHA-256 before use. Rows are never edited: each fixture is one source file, one 
 source row order. Reading .rds follows the plan's rdata rules. No network calls.
 """
 import hashlib
+import html
 import sys
 import warnings
 from dataclasses import dataclass
@@ -107,10 +108,16 @@ RULE3_PLAYER_SEASONS = (
     ("ESP", 2019, 2302), ("ENG", 2021, 8845), ("ESP", 2019, 684), ("FRA", 2018, 684), ("GER", 2018, 684),  # Bruno, Hwang, Baba
     ("ESP", 2020, 4136), ("ESP", 2020, 6216), ("ESP", 2019, 6216),  # Ángel, and Chema in two seasons
     ("GER", 2023, 3738), ("ENG", 2020, 5613), ("ENG", 2021, 10092), ("ESP", 2023, 5159), ("ENG", 2020, 8756),  # Guirassy, Gabriel, Fosu-Henry, Marc Cardona, Dara O'Shea
+    ("ITA", 2021, 9882), ("FRA", 2022, 7947), ("FRA", 2022, 11399), ("ITA", 2019, 7941), ("ITA", 2019, 8259),  # Johnsen, Malinovskiy, Jeffinho, André and Djavan Anderson
+    ("ESP", 2023, 10095), ("FRA", 2018, 3738), ("ENG", 2022, 1245),  # Ezzalzouli, Guirassy under the FBref name, Emerson at West Ham
 )
 # Taken by club names, not through the link under test, as (league, year, home, away).
 RULE3_FBREF_PAIRS = (("ITA", 2024, "Atalanta", "Fiorentina"),)
-RULE3_FBREF_IDS = ("ac4a4508", "674cfc5a", "8eb68164", "cb9ef70f", "1d039497", "f365b837", "cfd8d664", "9ba48d64")  # the 3 merges, and Juanfran at 2 teams
+# Every row of these ids, so their minutes and Pool test are whole: the 3 merges, Juanfran at 2 teams, and the guard and flag cases.
+RULE3_FBREF_IDS = (
+    "ac4a4508", "674cfc5a", "8eb68164", "cb9ef70f", "1d039497", "f365b837", "cfd8d664", "9ba48d64",
+    "66784dee", "48d5bd33", "45cce300", "ca241ad3", "bed68338", "923f4dda", "e0bc6fdc", "67ac5bb8", "b92b456a", "169fd162",
+)
 
 NOT_FOUND = [
     ("A `Sub` Pos label", "FBref Pos has no `Sub` value in any stat file. Substitute appearances are taken from `Substitute` event rows instead."),
@@ -239,15 +246,25 @@ def cut_rule3(out):
         lines.append(f"| `rule3__{name}` | `data/standin/{name}` | {len(frame)} | {why} |")
         print(f"rule3__{name}\t{len(frame)}\t{(out / f'rule3__{name}').stat().st_size}")
 
+    names = set()
     for league, stem in join.SHOT_FILE_OF_LEAGUE.items():
         rows = pd.read_parquet(source.path(f"{league}_M_1st_positions.parquet"))
         match = rows["MatchURL"].str.extract(r"/matches/([0-9a-f]{8})/", expand=False)
         fbref_id = rows["Player_Href"].str.extract(r"/players/([0-9a-f]{8})/", expand=False)
         pairs = {(year, home, away) for found_league, year, home, away in RULE3_FBREF_PAIRS if found_league == league}
         in_pair = pd.Series([key in pairs for key in zip(rows["Season_End_Year"], rows["Home_Team"], rows["Away_Team"])], index=rows.index)
-        write(rows[match.isin(fbref_matches) | fbref_id.isin(RULE3_FBREF_IDS) | in_pair], f"{league}_M_1st_positions.parquet", "Whole FBref matches, and every row of the named ids")
+        kept = rows[match.isin(fbref_matches) | fbref_id.isin(RULE3_FBREF_IDS) | in_pair]
+        write(kept, f"{league}_M_1st_positions.parquet", "Whole FBref matches, and every row of the named ids")
+        names |= {(league, int(year) - 1, html.unescape(player)) for year, player in zip(kept["Season_End_Year"], kept["Player"])}
+        events = pd.read_parquet(source.path(f"{league}_M_1st_match_summary.parquet"))
+        write(events[events["MatchURL"].isin(kept["MatchURL"])], f"{league}_M_1st_match_summary.parquet", "All events of those FBref matches, for the substitutes")
         rows = pd.read_parquet(source.path(f"{stem}_shot_data.parquet"))
-        write(rows[[(league, match_id) in keys for match_id in rows["match_id"]]], f"{stem}_shot_data.parquet", "Whole Understat matches")
+        kept = rows[[(league, match_id) in keys for match_id in rows["match_id"]]]
+        write(kept, f"{stem}_shot_data.parquet", "Whole Understat matches")
+        names |= {(league, int(season), html.unescape(player)) for season, player in zip(kept["season"], kept["player"])}
+    rows = pd.read_parquet(source.path("understat_xg_data.parquet"))
+    wanted = [("ENG" if league == "EPL" else league, int(season[:4]), html.unescape(name)) in names for league, season, name in zip(rows["league"], rows["season"], rows["player_name"])]
+    write(rows[wanted], "understat_xg_data.parquet", "Season totals rows under any name in the sample's league-seasons")
     (out / "rule3__club_map.csv").write_bytes(source.path("club_map.csv").read_bytes())
     lines.append("| `rule3__club_map.csv` | `data/standin/club_map.csv` | all | The whole map |")
     table = "\n".join(lines)

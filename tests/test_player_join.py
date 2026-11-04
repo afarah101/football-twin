@@ -8,11 +8,14 @@ import sys
 import unittest
 from functools import lru_cache
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest import mock
 
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
+sys.path[:0] = [str(ROOT), str(ROOT / "scripts")]
+import measure_rule3 as script
 from twin.infrastructure.standin import player_join as join
 
 SAMPLE = join.StandinFiles(ROOT / "tests" / "fixtures" / "standin", "rule3__")
@@ -652,6 +655,264 @@ class StageBNameSteps(unittest.TestCase):
         barred = join.season_anchor_links({hand_group("m3"): {"x", "y"}}, two_other, [("ESP", 2021, 1)]).barred
         self.assertEqual(barred, {hand_group("m3"): "x"})
         self.assertEqual(join.link_keys(barred), ["ESP|2021|1|Kike|x"])
+
+
+HAND_SEASON_ROWS = {("ESP", 2021, "Kike"): [join.SeasonRow({"A"}, 900)]}
+
+
+def hand_facts(fbref_minutes, season_rows=None, shot_names=None, fbref_names=None, fbref_clubs=None):
+    """Hand-made guard facts. Only synthetic tests use it."""
+    return join.GuardFacts(
+        season_rows if season_rows is not None else HAND_SEASON_ROWS, {("ESP", 2022, fbref_id): minutes for fbref_id, minutes in fbref_minutes.items()},
+        fbref_names or {}, fbref_clubs or {}, shot_names or {("ESP", 2021, 1): {"Kike"}},
+    )
+
+
+@lru_cache(maxsize=None)
+def sample_rule3():
+    facts = join.guard_facts(sample_merged(), sample_shots(), join.season_rows_by_name(sample_clubs(), SAMPLE))
+    return join.rule3_links(sample_rows_of(), sample_rosters(), facts, frozenset(["ESP|2023|10095|Abdessamad Ezzalzouli|bed68338"]))
+
+
+@lru_cache(maxsize=None)
+def sample_facts():
+    return join.guard_facts(sample_merged(), sample_shots(), join.season_rows_by_name(sample_clubs(), SAMPLE))
+
+
+@lru_cache(maxsize=None)
+def sample_candidates():
+    return join.pool_candidates(sample_merged(), SAMPLE)
+
+
+@lru_cache(maxsize=None)
+def sample_partial():
+    return join.partial_joins(sample_rows_of(), sample_rule3().final)
+
+
+@lru_cache(maxsize=None)
+def sample_flags():
+    return join.review_flags(sample_candidates(), sample_rule3().final, sample_partial(), sample_rule3().name_map.two_ids)
+
+
+def lookup(league, season, shot_names, fbref_id):
+    facts = sample_facts()
+    return join.season_totals_row(facts, league, season, shot_names, fbref_id)
+
+
+ANDERSON = join.PlayerSeasonName("ITA", 2019, 7941, "André Anderson", "ca241ad3")
+EZZALZOULI = join.PlayerSeasonName("ESP", 2023, 10095, "Abdessamad Ezzalzouli", "bed68338")
+GABRIEL = join.PlayerSeasonName("ENG", 2020, 5613, "Gabriel", "67ac5bb8")
+MALINOVSKYI = ("FRA", 2023, "48d5bd33")
+JOHNSEN = ("ITA", 2022, "66784dee")
+JEFFINHO = ("FRA", 2023, "45cce300")
+
+
+class StageCGuardAndFlags(unittest.TestCase):
+    def test_c_guard_runs_once_per_name_map_player_season(self):
+        rule3 = sample_rule3()
+        pairs = {join.PlayerSeasonName(*group.player_season_name, fbref_id) for group, fbref_id in rule3.name_map.links.items()}
+        self.assertGreater(len(rule3.name_map.links), len(pairs))
+        # Once per pair: the lookup is called once per verdict, not once per shot group.
+        with mock.patch.object(join, "season_totals_row", wraps=join.season_totals_row) as totals_row:
+            again = join.rule3_links(sample_rows_of(), sample_rosters(), sample_facts())
+        self.assertEqual(totals_row.call_count, len(again.guard) + len(again.anchor_guard))
+        self.assertEqual(set(again.guard), pairs)
+        # After the merges: Strefezza's minutes are his two ids' together, 410 and 703.
+        pair = join.PlayerSeasonName("ITA", 2023, 1, "Gabriel Strefezza", "ac4a4508")
+        self.assertEqual(join.minutes_guard([pair], sample_facts())[pair][2], 1113)
+
+    def test_c_limit_is_90_minutes_at_low_totals(self):
+        self.assertEqual(join.minutes_limit(49, 167), 90)
+        self.assertEqual(sample_rule3().guard[ANDERSON], ("disagree", 49, 167))
+
+    def test_c_limit_is_10_percent_of_larger_total(self):
+        self.assertAlmostEqual(join.minutes_limit(839, 933), 93.3)
+        self.assertEqual(sample_rule3().guard[EZZALZOULI], ("approved", 839, 933))
+        unapproved = join.minutes_guard([EZZALZOULI], sample_facts())
+        self.assertEqual(unapproved[EZZALZOULI][0], "disagree")
+
+    def test_c_synthetic_gap_at_the_limit_keeps_the_link(self):
+        # synthetic: 0 real gaps exactly at the limit (design check).
+        pair = join.PlayerSeasonName("ESP", 2021, 1, "Kike", "x")
+        self.assertEqual(join.minutes_guard([pair], hand_facts({"x": 1000}), frozenset())[pair], ("agree", 900, 1000))
+        self.assertEqual(join.minutes_guard([pair], hand_facts({"x": 1001}), frozenset())[pair], ("disagree", 900, 1001))
+
+    def test_c_link_beyond_the_limit_is_removed_and_listed(self):
+        rule3 = sample_rule3()
+        group = sample_groups_of("ITA", 2019, 7941, "588b69d5")[0]
+        self.assertEqual(rule3.name_map.links[group], "ca241ad3")
+        self.assertNotIn(group, rule3.after_guard)
+        self.assertEqual(rule3.guard[ANDERSON][0], "disagree")
+        self.assertIn(ANDERSON, join.guard_review_list(rule3)["disagree"])
+
+    def test_c_lookup_uses_shot_name(self):
+        row = lookup("ENG", 2021, {"Hee-Chan Hwang"}, "169fd162")
+        self.assertEqual(row.minutes, 1804)
+
+    def test_c_lookup_uses_any_spelling_of_the_player_season(self):
+        fbref_id = sample_rule3().final[sample_groups_of("GER", 2023, 3738)[0]][1]
+        self.assertEqual(sample_facts().shot_names[("GER", 2023, 3738)], {"Sehrou Guirassy", "Serhou Guirassy"})
+        self.assertEqual(lookup("GER", 2023, sample_facts().shot_names[("GER", 2023, 3738)], fbref_id).minutes, 2228)
+        pair = join.PlayerSeasonName("GER", 2023, 3738, "Sehrou Guirassy", fbref_id)
+        self.assertEqual(sample_rule3().guard[pair][0], "agree")
+        # Without the FBref name the row is under the other shot spelling only, so only "every spelling" can reach it.
+        without_fbref_name = sample_facts()._replace(fbref_names={})
+        self.assertEqual(join.minutes_guard([pair], without_fbref_name)[pair][1], 2228)
+
+    def test_c_lookup_falls_back_to_fbref_name(self):
+        # FRA 2018/19's shot rows say Sehrou, and the season row and FBref say Serhou.
+        self.assertEqual(sample_facts().shot_names[("FRA", 2018, 3738)], {"Sehrou Guirassy"})
+        self.assertFalse(sample_facts().season_rows.get(("FRA", 2018, "Sehrou Guirassy")))
+        self.assertIsNotNone(lookup("FRA", 2018, {"Sehrou Guirassy"}, "923f4dda"))
+        self.assertEqual(sample_rule3().guard[join.PlayerSeasonName("FRA", 2018, 3738, "Sehrou Guirassy", "923f4dda")][0], "agree")
+
+    def test_c_lookup_uses_club_when_two_rows_share_a_name(self):
+        self.assertEqual(len(sample_facts().season_rows[("ENG", 2022, "Emerson")]), 2)
+        self.assertEqual(lookup("ENG", 2022, {"Emerson"}, "e0bc6fdc").minutes, 1331)
+
+    def test_c_synthetic_no_season_row_keeps_link_flagged_none(self):
+        # synthetic: 0 real once the guard uses Q5 (design check).
+        group = hand_group(name="Kike Lopez")
+        rosters = {("m1", "A"): hand_roster(("x", "Enrique Lopez"))}
+        facts = hand_facts({"x": 900}, season_rows={}, shot_names={("ESP", 2021, 1): {"Kike Lopez"}}, fbref_names={("ESP", 2022, "x"): ["Enrique Lopez"]})
+        rule3 = join.rule3_links({group: 1}, rosters, facts)
+        pair = join.PlayerSeasonName("ESP", 2021, 1, "Kike Lopez", "x")
+        self.assertEqual(rule3.guard[pair], ("none", None, 900))
+        self.assertEqual(rule3.final, {group: ("map", "x")})
+        self.assertEqual(join.guard_review_list(rule3)["none"], [pair])
+        # No single row also means 2+ rows at the linked club, or 2+ rows none of them at that club.
+        two_rows = [join.SeasonRow({"A"}, 900), join.SeasonRow({"A"}, 800)]
+        for clubs in ({"A"}, {"B"}):
+            facts = hand_facts({"x": 900}, season_rows={("ESP", 2021, "Kike Lopez"): two_rows}, shot_names={("ESP", 2021, 1): {"Kike Lopez"}}, fbref_clubs={("ESP", 2022, "x"): clubs})
+            self.assertEqual(join.minutes_guard([pair], facts)[pair][0], "none")
+
+    def test_c_anchor_link_passes_the_guard(self):
+        rule3 = sample_rule3()
+        group = sample_groups_of("ENG", 2020, 5613, "9f6c52f8")[0]
+        self.assertEqual(rule3.anchor_guard[GABRIEL][0], "agree")
+        self.assertEqual(rule3.final[group], ("season_anchor", "67ac5bb8"))
+
+    def anchored_on_exact_links(self, season_minutes):
+        """Two exact links on x, then a match where step 2 finds x and y."""
+        groups = {hand_group("m1"): 1, hand_group("m2"): 1, hand_group("m3"): 1}
+        rosters = {("m1", "A"): hand_roster(("x", "Kike")), ("m2", "A"): hand_roster(("x", "Kike")), ("m3", "A"): hand_roster(("x", "Kike Garcia"), ("y", "Kike Lopez"))}
+        return groups, rosters, hand_facts({"x": 900}, season_rows={("ESP", 2021, "Kike"): [join.SeasonRow({"A"}, season_minutes)]})
+
+    def test_c_synthetic_guard_removes_anchor_link(self):
+        # synthetic: 0 real (design check).
+        groups, rosters, facts = self.anchored_on_exact_links(100)
+        rule3 = join.rule3_links(groups, rosters, facts)
+        self.assertEqual(rule3.anchors.links, {hand_group("m3"): "x"})
+        self.assertEqual(rule3.anchor_guard[join.PlayerSeasonName("ESP", 2021, 1, "Kike", "x")][0], "disagree")
+        self.assertNotIn(hand_group("m3"), rule3.final)
+
+    def test_c_synthetic_guard_removed_link_does_not_anchor(self):
+        # synthetic: 0 real (design check). Step 2 links m1 and m2 to x, the guard removes them, so m3 has nothing to anchor on.
+        groups = {hand_group("m1"): 1, hand_group("m2"): 1, hand_group("m3"): 1}
+        rosters = {("m1", "A"): hand_roster(("x", "Kike Garcia")), ("m2", "A"): hand_roster(("x", "Kike Garcia")), ("m3", "A"): hand_roster(("x", "Kike Garcia"), ("y", "Kike Lopez"))}
+        facts = hand_facts({"x": 900}, season_rows={("ESP", 2021, "Kike"): [join.SeasonRow({"A"}, 100)]})
+        rule3 = join.rule3_links(groups, rosters, facts)
+        self.assertEqual(set(rule3.name_map.links), {hand_group("m1"), hand_group("m2")})
+        self.assertEqual(rule3.guard[join.PlayerSeasonName("ESP", 2021, 1, "Kike", "x")][0], "disagree")
+        self.assertEqual(rule3.anchors.links, {})
+        self.assertEqual(rule3.final, {})
+
+    def test_c_every_anchor_link_is_listed(self):
+        rule3 = sample_rule3()
+        listing = join.anchor_listing(rule3)
+        self.assertIn(GABRIEL, [entry[0] for entry in listing])
+        self.assertEqual(sum(entry[2] for entry in listing), sum(sample_rows_of()[group] for group in rule3.anchors.links))
+        self.assertEqual(sum(entry[3] for entry in listing), len(rule3.anchors.links))
+
+    def test_c_name_map_holds_one_row_per_kept_player_season(self):
+        rule3 = sample_rule3()
+        rows = join.name_map_file_rows(rule3, {"ca241ad3": "Djavan Anderson"}.get)
+        keys = [(row[0], row[1], row[2], row[3], row[4]) for row in rows]
+        kept_groups = {group: link for group, link in rule3.final.items() if link[0] == "map"}
+        self.assertEqual(sum(row[6] for row in rows), sum(sample_rows_of()[group] for group in kept_groups))
+        self.assertEqual(sum(row[7] for row in rows), len(kept_groups))
+        self.assertEqual(len(keys), len(set(keys)))
+        self.assertNotIn(("ITA", 2019, 7941, "André Anderson", "ca241ad3"), keys)
+        self.assertIn(("ESP", 2023, 10095, "Abdessamad Ezzalzouli", "bed68338"), keys)
+        # Many shot groups, one review row: Guirassy's "Sehrou" is step 2 in many matches, and "Serhou" is exact, so not a map row.
+        self.assertEqual([key for key in keys if key[:3] == ("GER", 2023, 3738)], [("GER", 2023, 3738, "Sehrou Guirassy", sample_rule3().final[sample_groups_of("GER", 2023, 3738)[0]][1])])
+
+    def test_c_synthetic_redrawn_sample_pairs_fail_against_the_committed_file(self):
+        # synthetic: 0 real redraws (design check).
+        committed = "league,understat_season,understat_id,shot_name,fbref_id\nESP,2021,1,Kike,x\n"
+        join.check_sample_pairs({("ESP", 2021, 1, "x")}, committed)
+        with self.assertRaises(SystemExit) as stop:
+            join.check_sample_pairs({("ESP", 2021, 2, "y")}, committed)
+        self.assertIn("name_map_sample.csv", str(stop.exception))
+        # The script reads the committed file, not the working copy, and a new draw stops it before it writes anything.
+        with mock.patch.object(script.subprocess, "run", return_value=mock.Mock(stdout=committed)) as git:
+            self.assertEqual(script.committed_sample_text(), committed)
+        self.assertEqual(git.call_args.args[0], ["git", "show", "HEAD:docs/reports/name_map_sample.csv"])
+        fifty = [["ESP", 2021, number, "Kike", "z"] for number in range(50)]
+        with TemporaryDirectory() as folder, mock.patch.object(script, "name_map_file_rows", return_value=fifty), mock.patch.object(script, "committed_sample_text", return_value=committed), mock.patch.object(script, "NAME_MAP_FILE", Path(folder) / "name_map.csv"), mock.patch.object(script, "SAMPLE_FILE", Path(folder) / "sample.csv"):
+            with self.assertRaises(SystemExit):
+                script.write_outputs(None, {})
+            self.assertEqual(list(Path(folder).iterdir()), [])
+
+    def test_c_synthetic_id_collision_leaves_both_unjoined(self):
+        # synthetic: 0 real after the guard (design check).
+        first, second = hand_group(), hand_group(understat_id=2)
+        rule3 = join.rule3_links({first: 1, second: 1}, {("m1", "A"): hand_roster(("x", "Kike"))}, hand_facts({"x": 900}))
+        self.assertEqual(rule3.collisions, {("ESP", 2021, "x"): [1, 2]})
+        self.assertEqual(rule3.final, {})
+
+    def test_c_guard_removes_false_link_before_collision_check(self):
+        rule3 = sample_rule3()
+        anderson, djavan = sample_groups_of("ITA", 2019, 7941, "588b69d5")[0], sample_groups_of("ITA", 2019, 8259)[0]
+        self.assertEqual(rule3.name_map.links[anderson], "ca241ad3")
+        self.assertEqual(sample_joined()[djavan][1], "ca241ad3")
+        self.assertEqual(rule3.collisions, {})
+        self.assertEqual(rule3.final[djavan][1], "ca241ad3")
+        self.assertNotIn(anderson, rule3.final)
+
+    def test_c_partial_join_below_95_percent(self):
+        self.assertEqual(sample_partial()[("ITA", 2021, 9882)], (14, 15))
+
+    def test_c_no_partial_join_above_95_percent(self):
+        self.assertEqual(join.join_counts(sample_rows_of(), sample_rule3().final)[("ESP", 2023, 5159)], (21, 22))
+        self.assertNotIn(("ESP", 2023, 5159), sample_partial())
+
+    def test_c_synthetic_exactly_95_percent_is_not_flagged(self):
+        # synthetic: 0 real (design check).
+        joined, unjoined = hand_group("m1"), hand_group("m2")
+        self.assertEqual(join.partial_joins({joined: 19, unjoined: 1}, {joined: ("exact", "x")}), {})
+        self.assertEqual(join.partial_joins({joined: 18, unjoined: 2}, {joined: ("exact", "x")}), {("ESP", 2021, 1): (18, 20)})
+
+    def test_c_no_joined_rows_is_partial_join(self):
+        found, total = sample_partial()[("FRA", 2022, 7947)]
+        self.assertEqual((found, total), (0, 34))
+
+    def test_c_candidate_with_no_joined_shots_is_flagged(self):
+        self.assertIn(MALINOVSKYI, sample_candidates())
+        self.assertIn("no joined shots", sample_flags()[MALINOVSKYI])
+
+    def test_c_flagged_candidates_stay_out(self):
+        for candidate in (MALINOVSKYI, JOHNSEN):
+            self.assertIn(candidate, sample_candidates())
+            self.assertIn(candidate, sample_flags())
+            self.assertNotIn(candidate, join.pool_of(sample_candidates(), sample_flags()))
+        self.assertIn("partial_join", sample_flags()[JOHNSEN])
+
+    def test_c_partial_join_outside_the_candidates_is_held(self):
+        self.assertEqual(sample_partial()[("FRA", 2022, 11399)], (1, 10))
+        self.assertNotIn(JEFFINHO, sample_candidates())
+        self.assertEqual(sample_flags()[JEFFINHO], {"partial_join"})
+        # A player-season with no rows joined has no FBref id, so no PlayerSeason to hold. It stays listed in `partial`.
+        self.assertIn(("FRA", 2022, 7947), sample_partial())
+
+    def test_c_synthetic_two_id_candidate_is_held(self):
+        # synthetic: 0 real (design check).
+        first, second = hand_group("m1"), hand_group("m2")
+        two_ids = [join.TwoIds(("ESP", 2021, 1), ("x", "y"), True)]
+        flags = join.review_flags([("ESP", 2022, "x")], {first: ("exact", "x"), second: ("exact", "y")}, {}, two_ids)
+        self.assertEqual(flags, {("ESP", 2022, "x"): {"two ids"}})
+        self.assertEqual(join.pool_of([("ESP", 2022, "x")], flags), [])
+        self.assertEqual(join.review_flags([("ESP", 2022, "x")], {first: ("exact", "x"), second: ("exact", "y")}, {}, [join.TwoIds(("ESP", 2021, 1), ("x", "y"), False)]), {})
 
 
 if __name__ == "__main__":

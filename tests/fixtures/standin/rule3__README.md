@@ -4,14 +4,20 @@ Real rows for `tests/test_player_join.py`, cut from `data/standin/` and never ed
 
 | Fixture | Source file | Rows | What it holds |
 |---|---|---:|---|
-| `rule3__ENG_M_1st_positions.parquet` | `data/standin/ENG_M_1st_positions.parquet` | 1300 | Whole FBref matches, and every row of the named ids |
-| `rule3__epl_shot_data.parquet` | `data/standin/epl_shot_data.parquet` | 1162 | Whole Understat matches |
-| `rule3__ESP_M_1st_positions.parquet` | `data/standin/ESP_M_1st_positions.parquet` | 3361 | Whole FBref matches, and every row of the named ids |
-| `rule3__la_liga_shot_data.parquet` | `data/standin/la_liga_shot_data.parquet` | 2418 | Whole Understat matches |
-| `rule3__FRA_M_1st_positions.parquet` | `data/standin/FRA_M_1st_positions.parquet` | 215 | Whole FBref matches, and every row of the named ids |
-| `rule3__ligue_1_shot_data.parquet` | `data/standin/ligue_1_shot_data.parquet` | 145 | Whole Understat matches |
-| `rule3__GER_M_1st_positions.parquet` | `data/standin/GER_M_1st_positions.parquet` | 939 | Whole FBref matches, and every row of the named ids |
+| `rule3__ENG_M_1st_positions.parquet` | `data/standin/ENG_M_1st_positions.parquet` | 1902 | Whole FBref matches, and every row of the named ids |
+| `rule3__ENG_M_1st_match_summary.parquet` | `data/standin/ENG_M_1st_match_summary.parquet` | 5207 | All events of those FBref matches, for the substitutes |
+| `rule3__epl_shot_data.parquet` | `data/standin/epl_shot_data.parquet` | 1414 | Whole Understat matches |
+| `rule3__ESP_M_1st_positions.parquet` | `data/standin/ESP_M_1st_positions.parquet` | 4068 | Whole FBref matches, and every row of the named ids |
+| `rule3__ESP_M_1st_match_summary.parquet` | `data/standin/ESP_M_1st_match_summary.parquet` | 5251 | All events of those FBref matches, for the substitutes |
+| `rule3__la_liga_shot_data.parquet` | `data/standin/la_liga_shot_data.parquet` | 2911 | Whole Understat matches |
+| `rule3__FRA_M_1st_positions.parquet` | `data/standin/FRA_M_1st_positions.parquet` | 1155 | Whole FBref matches, and every row of the named ids |
+| `rule3__FRA_M_1st_match_summary.parquet` | `data/standin/FRA_M_1st_match_summary.parquet` | 3116 | All events of those FBref matches, for the substitutes |
+| `rule3__ligue_1_shot_data.parquet` | `data/standin/ligue_1_shot_data.parquet` | 817 | Whole Understat matches |
+| `rule3__GER_M_1st_positions.parquet` | `data/standin/GER_M_1st_positions.parquet` | 1016 | Whole FBref matches, and every row of the named ids |
+| `rule3__GER_M_1st_match_summary.parquet` | `data/standin/GER_M_1st_match_summary.parquet` | 1648 | All events of those FBref matches, for the substitutes |
 | `rule3__bundesliga_shot_data.parquet` | `data/standin/bundesliga_shot_data.parquet` | 799 | Whole Understat matches |
-| `rule3__ITA_M_1st_positions.parquet` | `data/standin/ITA_M_1st_positions.parquet` | 203 | Whole FBref matches, and every row of the named ids |
-| `rule3__serie_a_shot_data.parquet` | `data/standin/serie_a_shot_data.parquet` | 82 | Whole Understat matches |
+| `rule3__ITA_M_1st_positions.parquet` | `data/standin/ITA_M_1st_positions.parquet` | 867 | Whole FBref matches, and every row of the named ids |
+| `rule3__ITA_M_1st_match_summary.parquet` | `data/standin/ITA_M_1st_match_summary.parquet` | 4570 | All events of those FBref matches, for the substitutes |
+| `rule3__serie_a_shot_data.parquet` | `data/standin/serie_a_shot_data.parquet` | 517 | Whole Understat matches |
+| `rule3__understat_xg_data.parquet` | `data/standin/understat_xg_data.parquet` | 3291 | Season totals rows under any name in the sample's league-seasons |
 | `rule3__club_map.csv` | `data/standin/club_map.csv` | all | The whole map |
