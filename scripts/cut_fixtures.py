@@ -95,8 +95,19 @@ RULE3_SHOT_MATCHES = (
     ("GER", 2023, "Bochum", "Augsburg"),
 )
 # Whole shot matches by id, for rows outside the Pool seasons or with one spelling of the league.
-RULE3_SHOT_MATCH_IDS = (("ESP", 1779), ("ESP", 5826), ("ESP", 18962))
-RULE3_FBREF_MATCHES = ("e0449015",)  # Spezia v Hellas Verona, the one tie-breaker
+RULE3_SHOT_MATCH_IDS = (("ESP", 1779), ("ESP", 5826), ("ESP", 18962), ("ENG", 22275))
+RULE3_FBREF_MATCHES = (
+    "e0449015",  # Spezia v Hellas Verona, the one tie-breaker
+    # One real example of each step 1 and step 2 clause, each with its linked Understat match.
+    "017448ed", "01d63d4d", "06ec2f77", "082489f8", "0cbb18e2", "68df68a4", "127b8258", "11a67612", "21098c4b", "2424dced", "10b27265", "9ba359c1", "0abc466b", "ba501a17", "09d80d49", "010301bf", "711e1d1f",
+)
+# Every shot of a player-season, as (league, season, player_id), each match whole: the anchors, stops and named cases.
+RULE3_PLAYER_SEASONS = (
+    ("ESP", 2021, 2098), ("ESP", 2021, 8978),  # Luis Suárez, twice
+    ("ESP", 2019, 2302), ("ENG", 2021, 8845), ("ESP", 2019, 684), ("FRA", 2018, 684), ("GER", 2018, 684),  # Bruno, Hwang, Baba
+    ("ESP", 2020, 4136), ("ESP", 2020, 6216), ("ESP", 2019, 6216),  # Ángel, and Chema in two seasons
+    ("GER", 2023, 3738), ("ENG", 2020, 5613), ("ENG", 2021, 10092), ("ESP", 2023, 5159), ("ENG", 2020, 8756),  # Guirassy, Gabriel, Fosu-Henry, Marc Cardona, Dara O'Shea
+)
 # Taken by club names, not through the link under test, as (league, year, home, away).
 RULE3_FBREF_PAIRS = (("ITA", 2024, "Atalanta", "Fiorentina"),)
 RULE3_FBREF_IDS = ("ac4a4508", "674cfc5a", "8eb68164", "cb9ef70f", "1d039497", "f365b837", "cfd8d664", "9ba48d64")  # the 3 merges, and Juanfran at 2 teams
@@ -200,6 +211,11 @@ def main(originals, out):
 def rule3_shot_keys(shots):
     """The (league, match_id) of every Understat match the cases name."""
     keys = set(RULE3_SHOT_MATCH_IDS)
+    for league, season, player_id in RULE3_PLAYER_SEASONS:
+        found = shots[(shots["league"] == league) & (shots["season"] == season) & (shots["player_id"] == player_id)]
+        if found.empty:
+            raise SystemExit(f"no shot rows for {league} {season} {player_id}")
+        keys |= set(zip(found["league"], found["match_id"]))
     for league, season, home, away in RULE3_SHOT_MATCHES:
         found = shots[(shots["league"] == league) & (shots["season"] == season) & (shots["home_team"] == home) & (shots["away_team"] == away)]
         if found.empty:
@@ -214,6 +230,7 @@ def cut_rule3(out):
     shots = join.load_shots(source)
     keys = rule3_shot_keys(join.shot_files(source))
     links = join.link_matches(shots, join.load_positions(source), join.understat_to_fbref_clubs(source)).links
+    keys |= {key for key, match in links.items() if match in RULE3_FBREF_MATCHES}
     fbref_matches = set(RULE3_FBREF_MATCHES) | {links[key] for key in keys if key in links}
     lines = []
 

@@ -27,10 +27,11 @@ class TwoShotNamesReachOnePlayer(unittest.TestCase):
         cls.rows_of, _ = rule3.shot_groups(shots, links, positions)
         rosters = rule3.build_rosters(positions)
         joined = rule3.join_by_name(sorted(cls.rows_of), rosters)
-        cls.mapped, cls.undecided, _, _ = rule3.name_map_links(sorted(cls.rows_of), rosters, joined)
+        name_map = rule3.name_map_links(sorted(cls.rows_of), rosters, joined)
+        cls.mapped, cls.undecided = name_map.links, name_map.undecided
         # shortcut: builds the stages here, without the guard on other links or the collision rule, because main runs them inline. Upgrade when #6 moves rule 3 out of main.
         after_step_2 = {**joined, **{group: ("map", fbref_id) for group, fbref_id in cls.mapped.items()}}
-        cls.anchored, _ = rule3.season_anchor_links(cls.undecided, after_step_2)
+        cls.anchored = rule3.season_anchor_links(cls.undecided, after_step_2).links
         cls.final = {**after_step_2, **{group: ("season_anchor", fbref_id) for group, fbref_id in cls.anchored.items()}}
         cls.angel_minutes = int(positions.loc[positions["fbref_id"] == ANGEL_RODRIGUEZ, "Min"].sum())
 

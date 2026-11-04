@@ -1,4 +1,7 @@
 """Rule 2, id merges and rule 3 of docs/phase-1-plan.md: raw stand-in rows to the final join of shots to FBref players."""
+import html
+import re
+import unicodedata
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import date
@@ -12,6 +15,8 @@ SHOT_FILE_OF_LEAGUE = {"ENG": "epl", "ESP": "la_liga", "FRA": "ligue_1", "GER": 
 POOL_FIRST_SEASON, POOL_LAST_SEASON = 2017, 2023
 MAX_LINK_GAP_DAYS = 14
 LISTED_GAP_DAYS = 1
+FOLDED_LETTERS = str.maketrans({"ø": "o", "ð": "d", "đ": "dj", "ı": "i", "ł": "l", "ß": "ss", "æ": "ae", "œ": "oe", "þ": "th"})
+MIN_ANCHOR_MATCHES = 2
 
 
 @dataclass(frozen=True)
@@ -51,6 +56,63 @@ class RefusedMerge(NamedTuple):
     reason: str
 
 
+class ShotGroup(NamedTuple):
+    """One player's shots in one match, as Understat names them. The club comes from the side and the linked match."""
+    league: str
+    season: int
+    match: str
+    understat_id: int
+    name: str
+    club: str
+
+    @property
+    def player_season_name(self):
+        return self.league, self.season, self.understat_id, self.name
+
+    @property
+    def player_season(self):
+        return self.league, self.season, self.understat_id
+
+
+class RosterPlayer(NamedTuple):
+    fbref_id: str
+    player: str
+    compared: str
+
+
+class PlayerSeasonName(NamedTuple):
+    """One review item: a player-season, under one shot name, on one FBref id."""
+    league: str
+    season: int
+    understat_id: int
+    name: str
+    fbref_id: str
+
+
+class TwoIds(NamedTuple):
+    """A player-season whose exact and step 1 links reach 2+ FBref ids. Plan: left to the id merges."""
+    player_season: tuple
+    ids: tuple
+    different_names: bool
+
+
+class NameMap(NamedTuple):
+    """Step 2's result. `stopped_links` are the links the 2+ FBref ids rule took away, for the review route."""
+    links: dict
+    undecided: dict
+    stopped: Counter
+    conflicts: list
+    stopped_links: dict
+    two_ids: list
+
+
+class Anchors(NamedTuple):
+    """Step 3's result. `barred` holds the links a stopped player-season would have made."""
+    links: dict
+    stopped: Counter
+    barred: dict
+
+
 def without_tie_breakers(positions):
     """Plan line 121: tie-breaker matches count for neither minutes nor shots, and a shot row can only link to what is left."""
     return positions[~positions["Matchweek"].str.contains("tie-breaker")]
@@ -70,8 +132,22 @@ def load_positions(files=StandinFiles()):
 
 def shot_files(files=StandinFiles(), columns=None):
     """Every season's shot rows. The league comes from the file name, because the `league` column spells one league two ways (T7:59)."""
-    frames = [pd.read_parquet(files.path(f"{stem}_shot_data.parquet"), columns=columns).assign(league=league) for league, stem in SHOT_FILE_OF_LEAGUE.items()]
+    frames = []
+    for league, stem in SHOT_FILE_OF_LEAGUE.items():
+        path = files.path(f"{stem}_shot_data.parquet")
+        rows = pd.read_parquet(path, columns=columns)
+        frames.append(rows.assign(league=league, source_file=path.name, source_row=range(len(rows))))
     return pd.concat(frames, ignore_index=True)
+
+
+def with_side(rows):
+    """`h_a`, or `home_away` where it is empty. D30: a row with no side, or an unknown one, has no club, so it stops the run."""
+    side = rows["h_a"].where(rows["h_a"].fillna("") != "", rows["home_away"]).fillna("")
+    for row, value in zip(rows.itertuples(), side):
+        if value not in ("h", "a"):
+            problem = f"unknown side {value!r}" if value else "no side"
+            raise SystemExit(f"{row.source_file}: row {row.source_row} has {problem}. Restore the file or re-trim it.")
+    return rows.assign(side=side)
 
 
 def load_shots(files=StandinFiles()):
@@ -79,16 +155,12 @@ def load_shots(files=StandinFiles()):
     rows = rows[rows["season"].between(POOL_FIRST_SEASON, POOL_LAST_SEASON)].copy()
     rows["season"] = rows["season"].astype(int)
     rows["player_id"] = rows["player_id"].astype(int)
-    # Every row fills exactly one of the two columns: the script prints the check.
-    rows["side"] = rows["h_a"].where(rows["h_a"].fillna("") != "", rows["home_away"])
-    if not set(rows["side"].fillna("")) <= {"h", "a"}:
-        raise SystemExit("a Pool shot row has no side, or an unknown one")
-    return rows
+    return with_side(rows)
 
 
 def earlier_shots(files=StandinFiles()):
     """Plan line 122: shot rows before the Pool seasons stay unchanged, for later live-Understat use."""
-    rows = shot_files(files)
+    rows = shot_files(files).drop(columns=["source_file", "source_row"])
     return rows[rows["season"] < POOL_FIRST_SEASON]
 
 
@@ -160,3 +232,145 @@ def positions_for_join(files=StandinFiles(), merges=True):
     """One path: the join only ever sees merged ids. Merges off exists only so the script can print the before-merge numbers."""
     positions = load_positions(files)
     return merge_fbref_ids(positions)[0] if merges else positions
+
+
+def decision_key(pair):
+    """The key review_decisions.csv uses for a name_map or season_anchor link."""
+    return f"{pair.league}|{pair.season}|{pair.understat_id}|{html.unescape(pair.name)}|{pair.fbref_id}"
+
+
+def link_keys(links):
+    """The review keys of links given as {ShotGroup: fbref_id}, one per player-season, shot name and FBref id."""
+    return sorted({decision_key(PlayerSeasonName(*group.player_season_name, fbref_id)) for group, fbref_id in links.items()})
+
+
+def compared_name(name):
+    """Step 1: case, accents and punctuation removed, letters NFKD does not reduce folded, a hyphen counts as a space."""
+    decomposed = unicodedata.normalize("NFKD", html.unescape(name))
+    folded = "".join(c for c in decomposed if not unicodedata.combining(c)).casefold().translate(FOLDED_LETTERS)
+    return " ".join(re.sub(r"[^\w\s]", "", folded.replace("-", " ")).split())
+
+
+def is_name_map_candidate(shot_words, roster_words):
+    """Step 2: shares the last name, or one name holds the other as whole words, in any order."""
+    return roster_words[-1] == shot_words[-1] or set(shot_words) <= set(roster_words) or set(roster_words) <= set(shot_words)
+
+
+def shot_groups(shots, links, positions):
+    """Rows per ShotGroup, in linked matches only. Also returns each linked shot row's group."""
+    fbref_matches = positions.drop_duplicates("match").set_index("match")
+    home, away = fbref_matches["Home_Team"].to_dict(), fbref_matches["Away_Team"].to_dict()
+    rows, keys = Counter(), []
+    for league, season, match_id, name, understat_id, side in zip(shots["league"], shots["season"], shots["match_id"], shots["player"], shots["player_id"], shots["side"]):
+        match = links.get((league, match_id))
+        if match is None:
+            keys.append(None)
+            continue
+        group = ShotGroup(league, season, match, understat_id, name, home[match] if side == "h" else away[match])
+        rows[group] += 1
+        keys.append(group)
+    return rows, keys
+
+
+def build_rosters(positions):
+    rosters = defaultdict(list)
+    for match, club, fbref_id, player in zip(positions["match"], positions["Team"], positions["fbref_id"], positions["Player"]):
+        rosters[(match, club)].append(RosterPlayer(fbref_id, player, compared_name(player)))
+    return rosters
+
+
+def join_by_name(groups, rosters):
+    """Exact, then step 1. Two players matching inside one club and match decides nothing, so that group stays unjoined."""
+    joined = {}
+    for group in groups:
+        roster = rosters[(group.match, group.club)]
+        exact = [player for player in roster if player.player == html.unescape(group.name)]
+        same = [player for player in roster if player.compared == compared_name(group.name)]
+        if len(exact) == 1:
+            joined[group] = ("exact", exact[0].fbref_id)
+        elif not exact and len(same) == 1:
+            joined[group] = ("step 1", same[0].fbref_id)
+    return joined
+
+
+def name_map_links(groups, rosters, joined):
+    """Step 2, within the match and club only. Lists what each rule stopped, with the links the 2+ FBref ids rule took away."""
+    taken = {(group.match, joined[group][1]) for group in joined}
+    claims, undecided, stopped = defaultdict(list), {}, Counter()
+    for group in groups:
+        if group in joined:
+            continue
+        shot_words = compared_name(group.name).split()
+        options = [player for player in rosters[(group.match, group.club)] if (group.match, player.fbref_id) not in taken and player.compared and shot_words and is_name_map_candidate(shot_words, player.compared.split())]
+        if len(options) == 1:
+            claims[(group.match, options[0].fbref_id)].append(group)
+        elif options:
+            undecided[group] = {player.fbref_id for player in options}
+            stopped["2+ candidates"] += 1
+        else:
+            stopped["no candidate"] += 1
+    links = {}
+    for (_, fbref_id), claimants in claims.items():
+        if len(claimants) > 1:
+            stopped["two shot names on one roster player"] += len(claimants)
+        else:
+            links[claimants[0]] = fbref_id
+    ids_of_player_season = defaultdict(set)
+    for group, link in joined.items():
+        ids_of_player_season[group.player_season].add(link[1])
+    for group, fbref_id in links.items():
+        ids_of_player_season[group.player_season].add(fbref_id)
+    # Only step 2 links stop. Exact and step 1 links stay, and two ids with no step 2 link are left to the id merges.
+    conflicts = sorted({group.player_season for group in links if len(ids_of_player_season[group.player_season]) > 1})
+    stopped["player-seasons reaching 2+ FBref ids"] = len(conflicts)
+    stopped_links = {group: fbref_id for group, fbref_id in links.items() if group.player_season in conflicts}
+    return NameMap({group: fbref_id for group, fbref_id in links.items() if group not in stopped_links}, undecided, stopped, conflicts, stopped_links, two_id_player_seasons(joined, rosters, conflicts))
+
+
+def two_id_player_seasons(joined, rosters, conflicts):
+    """Q3: player-seasons whose exact and step 1 links alone reach 2+ FBref ids, and whether those ids carry different names."""
+    ids_of, names_of = defaultdict(set), defaultdict(set)
+    for group, (_, fbref_id) in joined.items():
+        ids_of[group.player_season].add(fbref_id)
+        names_of[fbref_id] |= {player.player for player in rosters[(group.match, group.club)] if player.fbref_id == fbref_id}
+    return [TwoIds(key, tuple(sorted(ids)), len(set.union(*(names_of[fbref_id] for fbref_id in ids))) > 1) for key, ids in sorted(ids_of.items()) if len(ids) > 1 and key not in conflicts]
+
+
+def links_after_step_2(joined, name_map):
+    return {**joined, **{group: ("map", fbref_id) for group, fbref_id in name_map.links.items()}}
+
+
+def season_anchor_links(undecided, linked, stopped_player_seasons=()):
+    """Step 3: in a match with 2+ candidates, the one FBref id the same Understat id links to in 2+ other matches of that season and club.
+
+    Anchors come only from links that survived the guard, and one pass only, so an anchor link never anchors another.
+    A stopped player-season gains no link: what it would have made is listed as barred, each with its own key (Q4).
+    """
+    matches_of_id = defaultdict(lambda: defaultdict(set))
+    for group, (step, fbref_id) in linked.items():
+        if step != "season_anchor":
+            matches_of_id[(group.league, group.season, group.understat_id, group.club)][fbref_id].add(group.match)
+    taken = {(group.match, link[1]) for group, link in linked.items()}
+    claims, stopped = defaultdict(list), Counter()
+    for group, candidates in undecided.items():
+        ids = matches_of_id.get((group.league, group.season, group.understat_id, group.club), {})
+        if len(ids) != 1:
+            stopped["no links for that club" if not ids else "links to 2+ FBref ids"] += 1
+            continue
+        fbref_id, matches = next(iter(ids.items()))
+        if len(matches - {group.match}) < MIN_ANCHOR_MATCHES:
+            stopped[f"under {MIN_ANCHOR_MATCHES} other matches"] += 1
+        elif fbref_id not in candidates:
+            stopped["id not a candidate"] += 1
+        elif (group.match, fbref_id) in taken:
+            stopped["id already linked in that match"] += 1
+        else:
+            claims[(group.match, fbref_id)].append(group)
+    links = {}
+    for (_, fbref_id), claimants in claims.items():
+        if len(claimants) > 1:
+            stopped["two shot names on one roster player"] += len(claimants)
+        else:
+            links[claimants[0]] = fbref_id
+    barred = {group: fbref_id for group, fbref_id in links.items() if group.player_season in stopped_player_seasons}
+    return Anchors({group: fbref_id for group, fbref_id in links.items() if group not in barred}, stopped, barred)
