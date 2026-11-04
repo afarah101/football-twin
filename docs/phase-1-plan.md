@@ -144,6 +144,7 @@ These also override earlier decisions where they differ.
     - A `pool_candidate` that goes back in the Pool with no joined shots stops #6 with an error, because its shot metrics would read as zero. Its shots need a `partial_join` row with `link_to`. A decision that puts two Understat ids on one FBref id is applied only with `merge_ids`, and the #6 report lists it. With `link_to` or `approve`, #6 stops with an error that names both ids. #6 checks this after applying every row, so row order never changes the result.
     - After the decisions, #6 works out `partial_join` again, so a player-season at 95% or above loses the flag. A `reject` on a `partial_join` or `pool_candidate` keeps it flagged.
     - The #6 report shows the Pool count before and after the decisions.
+  - Acceptance check: #6 ticket 1 must test every rule 3 clause in the new join module.
   - The #6 report gives the join rate in 3 steps: exact, after step 1, after step 2. It then gives the rate after the guard, after step 3 and its guard, and after the id collision rule. Rows still unjoined are counted per league-season. It also says how Raúl García 2018/19 (id 5114), Bruno 2019/20 (id 2302) and Ousmane Camara 2022/23 (ids 11016 and 11249) resolved, for Ahmed's review.
 
 ### Site and code

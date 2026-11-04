@@ -10,6 +10,7 @@ ANGEL_ID, CHEMA_ID = 4136, 6216
 ANGEL_RODRIGUEZ = "8cfc2f69"
 MATCHES_WITH_BOTH = {"92f705d2", "add782a1"}
 HWANG_ID, HWANG_FBREF_ID = 8845, "169fd162"
+BABA_ID, BABA_FBREF_ID = 684, "e4086af3"
 
 
 class TwoShotNamesReachOnePlayer(unittest.TestCase):
@@ -83,6 +84,31 @@ class NameWordsInAnotherOrder(unittest.TestCase):
         self.assertEqual({group.season for group in self.hwang}, {2021, 2022, 2023})
         for group in self.hwang:
             self.assertEqual(self.mapped.get(group), HWANG_FBREF_ID)
+
+
+class RosterNameInsideTheShotName(unittest.TestCase):
+    """ESP 2019/20, FRA 2018/19 and GER 2018/19: FBref's "Baba Rahman" is inside the shot name "Abdul Rahman Baba". Last names differ, so only the roster-inside-shot direction of the word set links them."""
+
+    def test_step_2_links_all_8_rows_in_all_3_player_seasons(self):
+        positions = rule3.load_positions()
+        shots = rule3.load_shots()
+        shots = shots[shots["match_id"].isin(shots.loc[shots["player_id"] == BABA_ID, "match_id"])]
+        links, _, _ = rule3.link_matches(shots, positions, rule3.understat_to_fbref_clubs())
+        rows_of, _ = rule3.shot_groups(shots, links, positions)
+        rosters = rule3.build_rosters(positions)
+        joined = rule3.join_by_name(sorted(rows_of), rosters)
+        mapped = rule3.name_map_links(sorted(rows_of), rosters, joined)[0]
+        baba = [group for group in rows_of if group.understat_id == BABA_ID]
+        self.assertEqual(sum(rows_of[group] for group in baba), 8)
+        self.assertEqual({group.player_season for group in baba}, {("ESP", 2019, BABA_ID), ("FRA", 2018, BABA_ID), ("GER", 2018, BABA_ID)})
+        for group in baba:
+            self.assertNotIn(group, joined)
+            self.assertEqual(mapped.get(group), BABA_FBREF_ID)
+
+
+class SelfCheck(unittest.TestCase):
+    def test_self_check_passes(self):
+        rule3.self_check()
 
 
 if __name__ == "__main__":

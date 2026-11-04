@@ -370,6 +370,8 @@ def self_check():
     assert is_name_map_candidate(["bruno"], ["bruno", "fernandes"])
     assert is_name_map_candidate(["kylian", "mbappe", "lottin"], ["kylian", "mbappe"])
     assert not is_name_map_candidate(["bruno"], ["brunos", "fernandes"])
+    # 0 real rows reach this direction out of order, so only an assert can hold it.
+    assert is_name_map_candidate(["fernandes", "bruno"], ["bruno", "miguel", "fernandes"])
     assert abs(minutes_limit(839, 933) - 93.3) < 1e-9 and minutes_limit(49, 167) == 90
     assert decision_key(PlayerSeasonName("ESP", 2023, 10095, "N&#039;Golo", "bed68338")) == "ESP|2023|10095|N'Golo|bed68338"
     shot = lambda match, understat_id=1, club="A": ShotGroup("ESP", 2021, match, understat_id, "Kike", club)
