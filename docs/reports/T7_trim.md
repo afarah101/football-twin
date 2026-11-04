@@ -1,6 +1,6 @@
 # T7: stand-in backfill, trim into private Parquet
 
-Run date: 2026-11-04, the re-trim and the rule 3 measurement. First trim: 2026-11-03. Issue: #7. Repo position at the first trim: `39b1c3a`, level with origin. This version is the re-trim Ahmed asked for after `8c93206`. Numbers come from output shown in this report, or from the script or commit the text names. The two audit sections say where theirs come from. The check scripts are in the appendix, because they sit outside this task's scope.
+Run date: 2026-11-04, the re-trim and the rule 3 measurement. First trim: 2026-11-03. Issue: #7. Repo position at the first trim: `39b1c3a`, level with origin. This version is the re-trim Ahmed asked for after `8c93206`. Numbers come from output shown in this report, or from the script or commit the text names. The audit sections say where theirs come from. The check scripts are in the appendix, because they sit outside this task's scope.
 
 ## Verdict
 
@@ -134,6 +134,18 @@ new candidates: [('ITA', 2024, '674cfc5a')]
 | F5 | Substitute detection has gaps, with 0 Pool flips across 3 separate repairs. `pool_candidates` combines both URLs of a match, which marks 4 players as substitutes when one URL alone would not, including Carlton Morris (90 minutes). The 305 off-roster names are F2 in the table above. |
 | F11 | The repo cannot prove "approved by Ahmed" (section 9, and row 1 of the review decisions, which arrived in `021e499`, co-authored by Claude). Ahmed can confirm. The fresh-venv run, mutation test, code-review log and the Caen and Udinese re-date checks were not re-run. |
 | F12 | Already disclosed: plan terms missing from `GLOSSARY.md`, `review_decisions.csv` outside `MANIFEST.md`, `approve` applied at the guard rather than after rule 3 (it changes exactly 30 rows, so no anchor spillover), and "plays once per season" holding only after the tie-breaker filter. `self_check` and `tests/test_measure_rule3.py` still leave most of the guard, the id collision rule, the date link and the decision reader without tests. |
+
+## Audit of `6666192..main`
+
+Run 2026-11-04. Verdict FAIL: 0 Critical, 1 Major, 9 Minor. Its F numbers are its own, not those in the sections above, and the numbers in its limits come from that audit. The Major (F1) and F2, F3, F4 and F8 are fixed.
+
+**Listed limits, not fixed:**
+
+- F5: Most of rule 3 has no committed test: the date link, the decision reader and most of the guard. Collision removal has never run on real data.
+- F6: 6 of 10 review_decisions changes exit 0, and approve with an fbref_id prints nothing. Given to #6 by plan:143.
+- F7: Some report claims are not reproducible from the repo: Ahmed's approvals (club map, row 1), the re-date checks, the code review log, the t7_verify.py comparison and the planted-fault run.
+- F9: Substitute detection has gaps: 305 of 91,589 events match no roster name, and 4 players are marked as substitutes through two-URL matches (including Carlton Morris, 90 minutes). 0 Pool flips.
+- F10: Plan terms are missing from GLOSSARY.md, including partial_join and name_match. Left for #6.
 
 ## Joining shots to players, measured for #6
 

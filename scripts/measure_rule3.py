@@ -63,6 +63,10 @@ class ShotGroup(NamedTuple):
     def player_season_name(self):
         return self.league, self.season, self.understat_id, self.name
 
+    @property
+    def player_season(self):
+        return self.league, self.season, self.understat_id
+
 
 class RosterPlayer(NamedTuple):
     fbref_id: str
@@ -224,11 +228,14 @@ def name_map_links(groups, rosters, joined):
         else:
             links[claimants[0]] = fbref_id
     ids_of_player_season = defaultdict(set)
+    for group, link in joined.items():
+        ids_of_player_season[group.player_season].add(link[1])
     for group, fbref_id in links.items():
-        ids_of_player_season[(group.league, group.season, group.understat_id)].add(fbref_id)
-    conflicts = sorted(key for key, ids in ids_of_player_season.items() if len(ids) > 1)
+        ids_of_player_season[group.player_season].add(fbref_id)
+    # Only step 2 links stop. Exact and step 1 links stay, and two ids with no step 2 link are left to the id merges.
+    conflicts = sorted({group.player_season for group in links if len(ids_of_player_season[group.player_season]) > 1})
     stopped["player-seasons reaching 2+ FBref ids"] = len(conflicts)
-    return {group: fbref_id for group, fbref_id in links.items() if (group.league, group.season, group.understat_id) not in conflicts}, undecided, stopped, conflicts
+    return {group: fbref_id for group, fbref_id in links.items() if group.player_season not in conflicts}, undecided, stopped, conflicts
 
 
 def season_anchor_links(undecided, linked):
@@ -379,6 +386,9 @@ def self_check():
     roster_with = lambda second_id: {("m1", "A"): [RosterPlayer("x", "S Guirassy", "s guirassy")], ("m2", "A"): [RosterPlayer(second_id, "S Guirassy", "s guirassy")]}
     assert len(name_map_links(spellings, roster_with("x"), {})[0]) == 2
     assert name_map_links(spellings, roster_with("y"), {})[0] == {}
+    assert name_map_links(spellings, roster_with("y"), {spellings[1]: ("exact", "y")})[0] == {}
+    assert len(name_map_links(spellings, roster_with("x"), {spellings[1]: ("exact", "x")})[0]) == 1
+    assert name_map_links(spellings, roster_with("y"), {spellings[0]: ("exact", "x"), spellings[1]: ("exact", "y")})[3] == []
 
 
 def main():
