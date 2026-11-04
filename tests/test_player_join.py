@@ -671,7 +671,7 @@ def hand_facts(fbref_minutes, season_rows=None, shot_names=None, fbref_names=Non
 @lru_cache(maxsize=None)
 def sample_rule3():
     facts = join.guard_facts(sample_merged(), sample_shots(), join.season_rows_by_name(sample_clubs(), SAMPLE))
-    return join.rule3_links(sample_rows_of(), sample_rosters(), facts, frozenset(["ESP|2023|10095|Abdessamad Ezzalzouli|bed68338"]))
+    return join.rule3_links(sample_rows_of(), sample_rosters(), facts)
 
 
 @lru_cache(maxsize=None)
@@ -727,15 +727,14 @@ class StageCGuardAndFlags(unittest.TestCase):
 
     def test_c_limit_is_10_percent_of_larger_total(self):
         self.assertAlmostEqual(join.minutes_limit(839, 933), 93.3)
-        self.assertEqual(sample_rule3().guard[EZZALZOULI], ("approved", 839, 933))
-        unapproved = join.minutes_guard([EZZALZOULI], sample_facts())
-        self.assertEqual(unapproved[EZZALZOULI][0], "disagree")
+        # A gap of 94 against 93.3.
+        self.assertEqual(sample_rule3().guard[EZZALZOULI], ("disagree", 839, 933))
 
     def test_c_synthetic_gap_at_the_limit_keeps_the_link(self):
         # synthetic: 0 real gaps exactly at the limit (design check).
         pair = join.PlayerSeasonName("ESP", 2021, 1, "Kike", "x")
-        self.assertEqual(join.minutes_guard([pair], hand_facts({"x": 1000}), frozenset())[pair], ("agree", 900, 1000))
-        self.assertEqual(join.minutes_guard([pair], hand_facts({"x": 1001}), frozenset())[pair], ("disagree", 900, 1001))
+        self.assertEqual(join.minutes_guard([pair], hand_facts({"x": 1000}))[pair], ("agree", 900, 1000))
+        self.assertEqual(join.minutes_guard([pair], hand_facts({"x": 1001}))[pair], ("disagree", 900, 1001))
 
     def test_c_link_beyond_the_limit_is_removed_and_listed(self):
         rule3 = sample_rule3()
@@ -833,7 +832,6 @@ class StageCGuardAndFlags(unittest.TestCase):
         self.assertEqual(sum(row[7] for row in rows), len(kept_groups))
         self.assertEqual(len(keys), len(set(keys)))
         self.assertNotIn(("ITA", 2019, 7941, "André Anderson", "ca241ad3"), keys)
-        self.assertIn(("ESP", 2023, 10095, "Abdessamad Ezzalzouli", "bed68338"), keys)
         # Many shot groups, one review row: Guirassy's "Sehrou" is step 2 in many matches, and "Serhou" is exact, so not a map row.
         self.assertEqual([key for key in keys if key[:3] == ("GER", 2023, 3738)], [("GER", 2023, 3738, "Sehrou Guirassy", sample_rule3().final[sample_groups_of("GER", 2023, 3738)[0]][1])])
 
@@ -913,6 +911,714 @@ class StageCGuardAndFlags(unittest.TestCase):
         self.assertEqual(flags, {("ESP", 2022, "x"): {"two ids"}})
         self.assertEqual(join.pool_of([("ESP", 2022, "x")], flags), [])
         self.assertEqual(join.review_flags([("ESP", 2022, "x")], {first: ("exact", "x"), second: ("exact", "y")}, {}, [join.TwoIds(("ESP", 2021, 1), ("x", "y"), False)]), {})
+
+
+def decision(item_type, key, verdict, fbref_id=""):
+    """One hand-made review row. Only synthetic tests use it, apart from row 1's real key."""
+    return {"item_type": item_type, "key": key, "decision": verdict, "fbref_id": fbref_id, "reviewer": "x", "date": "2026-01-01", "reason": "x"}
+
+
+def decisions_file(folder, text):
+    path = Path(folder) / "review_decisions.csv"
+    path.write_text(text, encoding="utf8")
+    return path
+
+
+HEADER = "item_type,key,decision,fbref_id,reviewer,date,reason\n"
+
+
+def positions_of(rosters, minutes=90):
+    """Hand-made FBref rows from hand-made rosters."""
+    rows = [(match, "2022-01-10", "A", "B", club, player.player, player.fbref_id, minutes) for (match, club), roster in rosters.items() for player in roster]
+    return fbref_rows(*rows).assign(Season_End_Year=2022)
+
+
+def at_900_minutes(positions):
+    totals = positions.groupby(["league", "Season_End_Year", "fbref_id"])["Min"].sum()
+    return sorted(totals[totals >= 900].index)
+
+
+def hand_run(rows_of, rosters, decisions=(), candidates=(), refused=(), positions=None, facts=None, merges_on=True):
+    """The whole of stage D on hand-made rows. Only synthetic tests use it."""
+    facts = facts or hand_facts(dict.fromkeys("xyzc", 900))
+    rule3 = join.rule3_links(rows_of, rosters, facts)
+    candidates_of = candidates if callable(candidates) else lambda _: sorted(candidates)
+    return join.finish_join(rule3, rows_of, rosters, positions_of(rosters) if positions is None else positions, list(decisions), list(refused), candidates_of, facts, merges_on)
+
+
+@lru_cache(maxsize=None)
+def sample_decisions():
+    return join.read_review_decisions(SAMPLE.path("review_decisions.csv"))
+
+
+def sample_finish(decisions=None, positions=None, refused=(), merges_on=True):
+    positions = sample_merged() if positions is None else positions
+    rows_of = join.shot_groups(sample_shots(), join.link_matches(sample_shots(), positions, sample_clubs()).links, positions)[0]
+    facts = join.guard_facts(positions, sample_shots(), join.season_rows_by_name(sample_clubs(), SAMPLE))
+    rule3 = join.rule3_links(rows_of, join.build_rosters(positions), facts)
+    return join.finish_join(rule3, rows_of, join.build_rosters(positions), positions, sample_decisions() if decisions is None else decisions, list(refused), lambda found: join.pool_candidates(found, SAMPLE), facts, merges_on)
+
+
+@lru_cache(maxsize=None)
+def sample_finished():
+    return sample_finish()
+
+
+JOHNSEN_KEYS = ("ITA|2021|66784dee", "ITA|2021|9882")
+EZZALZOULI_KEY = "ESP|2023|10095|Abdessamad Ezzalzouli|bed68338"
+CARDONA_GROUP = ("ESP", 2023, 5159, "b5b5ee07")
+
+
+def stopped_case():
+    """Two spellings that step 2 links to two FBref ids, so both links stop."""
+    first, second = hand_group("m1", name="Sehrou Kike"), hand_group("m2", name="Serhou Kike")
+    rosters = {("m1", "A"): hand_roster(("x", "S Kike"), ("z", "Enrique")), ("m2", "A"): hand_roster(("y", "S Kike"), ("z", "Enrique"))}
+    return first, second, {first: 1, second: 1}, rosters, "ESP|2021|1|Sehrou Kike|x", "ESP|2021|1|Serhou Kike|y"
+
+
+def barred_case():
+    """Exact links to x, a step 2 link to y that stops, and a group that would anchor on x."""
+    groups = {hand_group("m1"): 1, hand_group("m2"): 1, hand_group("m3"): 1, hand_group("m4", name="Kik"): 1}
+    rosters = {("m1", "A"): hand_roster(("x", "Kike")), ("m2", "A"): hand_roster(("x", "Kike")), ("m3", "A"): hand_roster(("x", "Kike Garcia"), ("w", "Kike Lopez")), ("m4", "A"): hand_roster(("y", "Kik Ramos"))}
+    return groups, rosters, "ESP|2021|1|Kik|y", "ESP|2021|1|Kike|x"
+
+
+def unjoined_case():
+    """One exact link on x in m1, and an unjoined row in m2, where only z is on the roster."""
+    joined, unjoined = hand_group("m1"), hand_group("m2")
+    return joined, unjoined, {joined: 1, unjoined: 1}, {("m1", "A"): hand_roster(("x", "Kike")), ("m2", "A"): hand_roster(("z", "Enrique"))}
+
+
+def collision_case():
+    """Two Understat ids reaching x exactly, in different matches."""
+    first, second = hand_group("m1"), hand_group("m2", understat_id=2)
+    return first, second, {first: 1, second: 1}, {("m1", "A"): hand_roster(("x", "Kike")), ("m2", "A"): hand_roster(("x", "Kike"))}
+
+
+def no_shots_case():
+    """Candidate c has no joined shots. x holds one exact link, in another match."""
+    group = hand_group("m1")
+    return group, {group: 1}, {("m1", "A"): hand_roster(("x", "Kike")), ("m3", "A"): hand_roster(("c", "Carlos"))}
+
+
+REFUSED = join.RefusedMerge("ESP", 2022, "Kike", ("x", "y"), "both ids in other seasons")
+
+
+def refused_case():
+    """Two ids of one player, refused. x holds an exact link. y plays only in m3."""
+    group = hand_group("m1")
+    return group, {group: 1}, {("m1", "A"): hand_roster(("x", "Kike")), ("m3", "A"): hand_roster(("y", "Kike"))}
+
+
+class StageDReviewDecisions(unittest.TestCase):
+    def assert_stops(self, *needles, **run):
+        with self.assertRaises(SystemExit) as stop:
+            hand_run(**run)
+        for needle in needles:
+            self.assertIn(needle, str(stop.exception))
+
+    def assert_file_stops(self, text, *needles):
+        with TemporaryDirectory() as folder, self.assertRaises(SystemExit) as stop:
+            join.read_review_decisions(decisions_file(folder, HEADER + text))
+        for needle in needles:
+            self.assertIn(needle, str(stop.exception))
+
+    def test_d_reader_reads_the_real_row(self):
+        self.assertEqual(len(sample_decisions()), 1)
+        row = sample_decisions()[0]
+        self.assertEqual((row["item_type"], row["key"], row["decision"], row["fbref_id"], row["reviewer"]), ("name_map", EZZALZOULI_KEY, "approve", "", "Ahmed"))
+
+    def test_d_synthetic_reader_accepts_byte_order_mark(self):
+        # synthetic: 0 real, the file has none.
+        with TemporaryDirectory() as folder:
+            path = Path(folder) / "review_decisions.csv"
+            path.write_text(HEADER + "name_map,k,approve,,x,y,z\n", encoding="utf-8-sig")
+            self.assertEqual(join.read_review_decisions(path)[0]["item_type"], "name_map")
+
+    def test_d_name_map_key_form(self):
+        self.assertEqual(join.decision_key(EZZALZOULI), EZZALZOULI_KEY)
+        self.assertEqual(join.decision_key(join.PlayerSeasonName("ESP", 2023, 10095, "N&#039;Golo", "bed68338")), "ESP|2023|10095|N'Golo|bed68338")
+
+    def test_d_synthetic_season_anchor_key_form(self):
+        # synthetic: 0 real rows.
+        groups, rosters, _, anchor_key = barred_case()
+        result = hand_run(groups, rosters, [decision("season_anchor", anchor_key, "approve")])
+        self.assertEqual(result.rule3.final[hand_group("m3")], ("season_anchor", "x"))
+
+    def test_d_synthetic_partial_join_key_form(self):
+        # synthetic: 0 real rows.
+        _, _, rows_of, rosters = unjoined_case()
+        self.assertEqual(join.partial_join_key(("ESP", 2021, 1)), "ESP|2021|1")
+        self.assertEqual(hand_run(rows_of, rosters, [decision("partial_join", "ESP|2021|1", "reject")]).rule3.final[hand_group("m1")], ("exact", "x"))
+
+    def test_d_synthetic_player_season_key_form(self):
+        # synthetic: 0 real rows. The FBref year is 2022, so the key's season is 2021.
+        self.assertEqual(join.player_season_key(("ESP", 2022, "c")), "ESP|2021|c")
+        _, rows_of, rosters = no_shots_case()
+        self.assertEqual(hand_run(rows_of, rosters, [decision("player_season", "ESP|2021|c", "reject")], [("ESP", 2022, "c")]).pool, [])
+        self.assert_stops("stale", rows_of=rows_of, rosters=rosters, decisions=[decision("player_season", "ESP|2022|c", "reject")], candidates=[("ESP", 2022, "c")])
+
+    def test_d_synthetic_measure_rule3_accepts_a_player_season_row(self):
+        # synthetic: 0 real rows (`data/standin/review_decisions.csv`).
+        with TemporaryDirectory() as folder:
+            self.assertEqual(script.read_review_decisions(decisions_file(folder, HEADER + "player_season,ESP|2021|c,reject,,x,y,z\n"))[0]["item_type"], "player_season")
+            with self.assertRaises(SystemExit):
+                script.read_review_decisions(decisions_file(folder, HEADER + "pool_" + "candidate,ESP|2021|c,reject,,x,y,z\n"))
+
+    def test_d_synthetic_measure_rule3_accepts_a_cross_season_row(self):
+        # synthetic: 0 real rows (`data/standin/review_decisions.csv`).
+        with TemporaryDirectory() as folder:
+            self.assertEqual(script.read_review_decisions(decisions_file(folder, HEADER + "cross_season_ids,1,approve,,x,y,z\n"))[0]["item_type"], "cross_season_ids")
+
+    def test_d_approve_runs_after_rule_3_and_changes_30_rows(self):
+        result, without_rows = sample_finished(), sample_finish([])
+        self.assertEqual(result.joined_after - result.joined_before, 30)
+        self.assertEqual(without_rows.joined_after, result.joined_before)
+        changed = set(result.rule3.final) - set(without_rows.rule3.final)
+        self.assertEqual({group.understat_id for group in changed}, {10095})
+        # Rule 3 runs without the decisions, and the guard's own verdict is still there to see.
+        self.assertEqual(sample_rule3().guard[EZZALZOULI][0], "disagree")
+
+    def test_d_approve_restores_guard_removed_link(self):
+        result = sample_finished()
+        self.assertEqual(result.rule3.guard[EZZALZOULI], ("approved", 839, 933))
+        group = next(found for found, pair in sample_rule3().pair_of.items() if pair == EZZALZOULI)
+        self.assertNotIn(group, sample_rule3().final)
+        self.assertEqual(result.rule3.final[group], ("map", "bed68338"))
+
+    def test_d_approved_link_stays_in_name_map_csv(self):
+        keys = [tuple(row[:5]) for row in join.name_map_file_rows(sample_finished().rule3, {}.get)]
+        self.assertIn(("ESP", 2023, 10095, "Abdessamad Ezzalzouli", "bed68338"), keys)
+        self.assertNotIn(("ESP", 2023, 10095, "Abdessamad Ezzalzouli", "bed68338"), [tuple(row[:5]) for row in join.name_map_file_rows(sample_finish([]).rule3, {}.get)])
+
+    def test_d_synthetic_approve_stays_on_its_own_link_type(self):
+        # synthetic: 0 real rows.
+        groups, rosters, name_map_key, anchor_key = barred_case()
+        self.assert_stops("stale", anchor_key, rows_of=groups, rosters=rosters, decisions=[decision("name_map", anchor_key, "approve")])
+        self.assert_stops("stale", name_map_key, rows_of=groups, rosters=rosters, decisions=[decision("season_anchor", name_map_key, "approve")])
+        # On its own type, `approve` brings back an anchor link the guard removed, and its verdict says so.
+        anchored = {hand_group("m1"): 1, hand_group("m2"): 1, hand_group("m3"): 1}
+        anchor_rosters = {("m1", "A"): hand_roster(("x", "Kike")), ("m2", "A"): hand_roster(("x", "Kike")), ("m3", "A"): hand_roster(("x", "Kike Garcia"), ("w", "Kike Lopez"))}
+        low_minutes = hand_facts({"x": 900}, season_rows={("ESP", 2021, "Kike"): [join.SeasonRow({"A"}, 100)]})
+        self.assertNotIn(hand_group("m3"), hand_run(anchored, anchor_rosters, facts=low_minutes).rule3.final)
+        result = hand_run(anchored, anchor_rosters, [decision("season_anchor", anchor_key, "approve")], facts=low_minutes)
+        self.assertEqual(result.rule3.final[hand_group("m3")], ("season_anchor", "x"))
+        self.assertEqual(result.rule3.anchor_guard[join.PlayerSeasonName("ESP", 2021, 1, "Kike", "x")][0], "approved")
+
+    def test_d_synthetic_approve_clears_partial_join(self):
+        # synthetic: 0 real rows.
+        _, _, rows_of, rosters = unjoined_case()
+        candidate = [("ESP", 2022, "x")]
+        self.assertEqual(hand_run(rows_of, rosters, [], candidate).pool, [])
+        result = hand_run(rows_of, rosters, [decision("partial_join", "ESP|2021|1", "approve")], candidate)
+        self.assertEqual(result.pool, candidate)
+        self.assertNotIn(("ESP", 2021, 1), result.partial)
+
+    def test_d_synthetic_approve_on_flagged_partial_join_stays_cleared(self):
+        # synthetic: hand-made row on Jeffinho, who has no `player_season` key, so this key is his only `approve` route.
+        result = sample_finish([decision("partial_join", "FRA|2022|11399", "approve")])
+        self.assertNotIn(JEFFINHO, result.flags)
+        self.assertNotIn(("FRA", 2022, 11399), result.partial)
+        self.assertIn(JEFFINHO, sample_finish([]).flags)
+
+    def test_d_synthetic_approve_returns_player_season(self):
+        # synthetic: 0 real rows.
+        _, _, rows_of, rosters = unjoined_case()
+        candidate = [("ESP", 2022, "x")]
+        self.assertEqual(hand_run(rows_of, rosters, [decision("player_season", "ESP|2021|x", "approve")], candidate).pool, candidate)
+
+    def test_d_synthetic_approved_player_season_stays_cleared_after_recompute(self):
+        # synthetic: hand-made row on Dennis Johnsen, 14 of 15 (T7:247).
+        self.assertNotIn(JOHNSEN, sample_finish([]).pool)
+        result = sample_finish([decision("player_season", JOHNSEN_KEYS[0], "approve")])
+        self.assertIn(JOHNSEN, result.pool)
+        self.assertNotIn(JOHNSEN, result.flags)
+        self.assertNotIn(("ITA", 2021, 9882), result.partial)
+
+    def test_d_synthetic_reject_removes_a_link(self):
+        # synthetic: 0 real rows.
+        group, other = hand_group("m1"), hand_group("m2")
+        rosters = {("m1", "A"): hand_roster(("x", "Kike Garcia")), ("m2", "A"): hand_roster(("x", "Kike"))}
+        rows_of = {group: 1, other: 1}
+        self.assertIn(group, hand_run(rows_of, rosters).rule3.final)
+        result = hand_run(rows_of, rosters, [decision("name_map", "ESP|2021|1|Kike|x", "reject")])
+        self.assertEqual(result.rule3.final, {other: ("exact", "x")})
+        self.assertEqual(join.name_map_file_rows(result.rule3, {}.get), [])
+        # An anchor resting on the rejected links goes with them, and the report lists it.
+        anchored = hand_group("m3")
+        evidence_rows = {hand_group("m1"): 1, hand_group("m2"): 1, anchored: 1}
+        evidence_rosters = {("m1", "A"): hand_roster(("x", "Kike Garcia")), ("m2", "A"): hand_roster(("x", "Kike Garcia")), ("m3", "A"): hand_roster(("x", "Kike Garcia"), ("w", "Kike Lopez"))}
+        self.assertEqual(hand_run(evidence_rows, evidence_rosters).rule3.final[anchored], ("season_anchor", "x"))
+        gone = hand_run(evidence_rows, evidence_rosters, [decision("name_map", "ESP|2021|1|Kike|x", "reject")])
+        self.assertEqual(gone.rule3.final, {})
+        self.assertEqual(gone.anchors_removed, [anchored])
+
+    def test_d_synthetic_reject_keeps_a_flag(self):
+        # synthetic: 0 real rows. The row joins m2, so `partial_join` would clear on its own, and the second row keeps the hold.
+        joined, _, rows_of, rosters = unjoined_case()
+        candidate = [("ESP", 2022, "x")]
+        result = hand_run(rows_of, rosters, [decision("player_season", "ESP|2021|x", "reject")], candidate)
+        self.assertEqual(result.pool, [])
+        self.assertIn(("ESP", 2022, "x"), result.flags)
+        rows = [decision("partial_join", "ESP|2021|1", "link_to", "z"), decision("player_season", "ESP|2021|x", "reject"), decision("cross_season_ids", "1", "approve")]
+        joined_up = hand_run({joined: 18, hand_group("m2"): 2}, rosters, rows, candidate)
+        self.assertEqual(joined_up.pool, [])
+        self.assertIn(("ESP", 2021, 1), joined_up.partial)
+
+    def test_d_synthetic_reject_does_not_clear_the_cross_season_failure(self):
+        # synthetic: 0 real (design check).
+        first, second = hand_group("m1", name="Kike Garcia"), hand_group("m2", name="Enrique Lopez")
+        rosters = {("m1", "A"): hand_roster(("x", "Kike Garcia")), ("m2", "A"): hand_roster(("y", "Enrique Lopez"))}
+        rows = {first: 1, second: 1}
+        self.assert_stops("cross_season_ids", rows_of=rows, rosters=rosters, decisions=[decision("player_season", "ESP|2021|x", "reject")], candidates=[("ESP", 2022, "x")])
+
+    def test_d_synthetic_link_to_joins_rows(self):
+        # synthetic: 0 real rows.
+        group = hand_group("m1")
+        rosters = {("m1", "A"): hand_roster(("x", "Kike Garcia"), ("z", "Enrique"))}
+        result = hand_run({group: 1}, rosters, [decision("name_map", "ESP|2021|1|Kike|x", "link_to", "z")])
+        self.assertEqual(result.rule3.final, {group: ("reviewed", "z")})
+        self.assertEqual(join.name_map_file_rows(result.rule3, {}.get), [])
+
+    def combined_case(self, shared_match=False):
+        group, carlos = hand_group("m1"), hand_group("m3", name="Carlos")
+        rosters = {("m1", "A"): hand_roster(("x", "Kike"), *([("c", "Carlos")] if shared_match else [])), ("m3", "A"): hand_roster(("c", "Carlos"))}
+        return group, {group: 1, carlos: 1}, rosters
+
+    def test_d_synthetic_link_to_player_season_combines_records(self):
+        # synthetic: 0 real rows. x and c each hold 90 minutes, and only together do they pass the hand-made 180-minute line.
+        group, rows_of, rosters = self.combined_case()
+        at_180 = lambda positions: sorted(key for key, total in positions.groupby(["league", "Season_End_Year", "fbref_id"])["Min"].sum().items() if total >= 180) + [("ESP", 2022, "c")]
+        result = hand_run(rows_of, rosters, [decision("player_season", "ESP|2021|c", "link_to", "x")], at_180)
+        self.assertEqual(set(result.positions["fbref_id"]), {"x"})
+        self.assertEqual(result.positions["Min"].sum(), 180)
+        # c's own joined shots come along under x, so they are not left on a retired id.
+        self.assertEqual(result.rule3.final, {group: ("exact", "x"), hand_group("m3", name="Carlos"): ("exact", "x")})
+        self.assertIn(("ESP", 2022, "x"), result.pool)
+
+    def test_d_synthetic_link_to_player_season_stops_on_shared_match(self):
+        # synthetic: 0 real rows.
+        _, rows_of, rosters = self.combined_case(shared_match=True)
+        self.assert_stops("share a match", rows_of=rows_of, rosters=rosters, decisions=[decision("player_season", "ESP|2021|c", "link_to", "x")], candidates=[("ESP", 2022, "c")])
+
+    def test_d_synthetic_combined_record_failing_pool_test_stays_out(self):
+        # synthetic: 0 real rows. The hand-made line is 900 minutes, and the two ids hold 180 together.
+        _, rows_of, rosters = self.combined_case()
+        candidates = lambda positions: [("ESP", 2022, "c")] if "c" in set(positions["fbref_id"]) else at_900_minutes(positions)
+        result = hand_run(rows_of, rosters, [decision("player_season", "ESP|2021|c", "link_to", "x")], candidates)
+        self.assertEqual(result.pool, [])
+        self.assertEqual(result.combined_outside_pool, [("ESP", 2022, "x")])
+
+    def test_d_synthetic_merge_ids_links_second_understat_id(self):
+        # synthetic: 0 real rows.
+        first, second, rows_of, rosters = collision_case()
+        result = hand_run(rows_of, rosters, [decision("name_map", "ESP|2021|2|Kike|x", "merge_ids", "x")])
+        self.assertEqual(result.rule3.final[second], ("reviewed", "x"))
+        self.assertEqual(result.rule3.final[first][1], "x")
+
+    def test_d_synthetic_merge_ids_key_exists_on_an_exact_link(self):
+        # synthetic: 0 real collisions (design check). Exact links have a key only inside a collision.
+        _, _, rows_of, rosters = collision_case()
+        self.assertEqual(hand_run(rows_of, rosters).rule3.final, {})
+        hand_run(rows_of, rosters, [decision("name_map", "ESP|2021|1|Kike|x", "merge_ids", "x")])
+        group = hand_group("m1")
+        self.assert_stops("stale", rows_of={group: 1}, rosters={("m1", "A"): hand_roster(("x", "Kike"))}, decisions=[decision("name_map", "ESP|2021|1|Kike|x", "reject")])
+
+    def test_d_synthetic_merge_ids_clears_the_no_id_collisions_check(self):
+        # synthetic: 0 real collisions (design check).
+        _, _, rows_of, rosters = collision_case()
+        self.assertEqual(hand_run(rows_of, rosters).collisions, {("ESP", 2021, "x"): [1, 2]})
+        self.assertEqual(hand_run(rows_of, rosters, [decision("name_map", "ESP|2021|2|Kike|x", "merge_ids", "x")]).collisions, {})
+        # `approve` on one id settles a collision too, and an exact link stays an exact link.
+        settled = hand_run(rows_of, rosters, [decision("name_map", "ESP|2021|1|Kike|x", "approve")])
+        self.assertEqual(settled.rule3.final, {hand_group("m1"): ("exact", "x")})
+        self.assertEqual(settled.rule3.anchor_pair_of, {})
+        # One row settles its own FBref id and lists every id it brought back. Another collision of the same id stays out.
+        three = {hand_group("m1"): 1, hand_group("m2", 2): 1, hand_group("m3", 3): 1}
+        three_rosters = {("m1", "A"): hand_roster(("x", "Kike")), ("m2", "A"): hand_roster(("x", "Kike")), ("m3", "A"): hand_roster(("x", "Kike"))}
+        self.assertEqual(hand_run(three, three_rosters, [decision("name_map", "ESP|2021|2|Kike|x", "merge_ids", "x")]).merged_collisions, [(("ESP", 2021, "x"), [1, 2, 3])])
+        crossed = {hand_group("m1"): 1, hand_group("m2", 2): 1, hand_group("m7"): 1, hand_group("m8", 3): 1}
+        crossed_rosters = {("m1", "A"): hand_roster(("x", "Kike")), ("m2", "A"): hand_roster(("x", "Kike")), ("m7", "A"): hand_roster(("w", "Kike")), ("m8", "A"): hand_roster(("w", "Kike"))}
+        allowed = decision("cross_season_ids", "1", "approve")
+        with self.assertRaises(SystemExit):
+            hand_run(crossed, crossed_rosters, [decision("name_map", "ESP|2021|2|Kike|x", "merge_ids", "x"), allowed])
+        only_x = hand_run(crossed, crossed_rosters, [decision("name_map", "ESP|2021|2|Kike|x", "merge_ids", "x")])
+        self.assertEqual(set(only_x.rule3.final), {hand_group("m1"), hand_group("m2", 2)})
+        self.assertEqual(only_x.collisions, {("ESP", 2021, "w"): [1, 3]})
+
+    def test_d_synthetic_merge_ids_row_is_listed(self):
+        # synthetic: 0 real rows.
+        _, _, rows_of, rosters = collision_case()
+        row = decision("name_map", "ESP|2021|2|Kike|x", "merge_ids", "x")
+        self.assertEqual(hand_run(rows_of, rosters, [row]).merge_ids_rows, [row])
+
+    def test_d_synthetic_approve_restores_stopped_link(self):
+        # synthetic: 0 real rows.
+        first, _, rows_of, rosters, first_key, _ = stopped_case()
+        self.assertEqual(hand_run(rows_of, rosters).rule3.final, {})
+        self.assertEqual(hand_run(rows_of, rosters, [decision("name_map", first_key, "approve")]).rule3.final, {first: ("map", "x")})
+
+    def test_d_synthetic_approved_stopped_link_needs_a_cross_season_row(self):
+        # synthetic: 0 real rows.
+        _, _, rows_of, rosters, first_key, second_key = stopped_case()
+        both = [decision("name_map", first_key, "approve"), decision("name_map", second_key, "approve")]
+        self.assert_stops("cross_season_ids", "1", rows_of=rows_of, rosters=rosters, decisions=both)
+        self.assertEqual(len(hand_run(rows_of, rosters, [*both, decision("cross_season_ids", "1", "approve")]).rule3.final), 2)
+
+    def test_d_synthetic_reject_leaves_stopped_link_removed(self):
+        # synthetic: 0 real rows.
+        _, _, rows_of, rosters, first_key, _ = stopped_case()
+        self.assertEqual(hand_run(rows_of, rosters, [decision("name_map", first_key, "reject")]).rule3.final, {})
+
+    def test_d_synthetic_link_to_redirects_stopped_link(self):
+        # synthetic: 0 real rows.
+        first, _, rows_of, rosters, first_key, _ = stopped_case()
+        self.assertEqual(hand_run(rows_of, rosters, [decision("name_map", first_key, "link_to", "z")]).rule3.final, {first: ("reviewed", "z")})
+
+    def test_d_synthetic_approving_stopped_link_keeps_the_bar(self):
+        # synthetic: 0 real rows.
+        groups, rosters, name_map_key, _ = barred_case()
+        result = hand_run(groups, rosters, [decision("name_map", name_map_key, "approve"), decision("cross_season_ids", "1", "approve")])
+        self.assertEqual(result.rule3.final[hand_group("m4", name="Kik")], ("map", "y"))
+        self.assertNotIn(hand_group("m3"), result.rule3.final)
+
+    def test_d_synthetic_barred_link_returns_through_its_own_row(self):
+        # synthetic: 0 real rows. Its own `link_to` works as well as its own `approve`.
+        groups, rosters, _, anchor_key = barred_case()
+        self.assertEqual(hand_run(groups, rosters, [decision("season_anchor", anchor_key, "approve")]).rule3.final[hand_group("m3")], ("season_anchor", "x"))
+        self.assertEqual(hand_run(groups, rosters, [decision("season_anchor", anchor_key, "link_to", "x")]).rule3.final[hand_group("m3")], ("reviewed", "x"))
+
+    def test_d_synthetic_stale_key_stops(self):
+        # synthetic: 0 real rows.
+        _, _, rows_of, rosters, _, _ = stopped_case()
+        self.assert_stops("stale", "ESP|2021|9|Nobody|x", rows_of=rows_of, rosters=rosters, decisions=[decision("name_map", "ESP|2021|9|Nobody|x", "approve")])
+
+    def test_d_guard_removed_link_is_not_stale(self):
+        self.assertIn(EZZALZOULI, sample_rule3().guard)
+        self.assertEqual(sample_rule3().guard[EZZALZOULI][0], "disagree")
+        self.assertEqual(len(sample_finished().rule3.final) - len(sample_finish([]).rule3.final), sum(1 for group, pair in sample_rule3().pair_of.items() if pair == EZZALZOULI))
+
+    def test_d_synthetic_collision_removed_link_is_not_stale(self):
+        # synthetic: 0 real collisions after the guard (design check).
+        first, second, rows_of, rosters = collision_case()
+        result = hand_run(rows_of, rosters, [decision("name_map", "ESP|2021|1|Kike|x", "reject")])
+        self.assertNotIn(first, result.rule3.final)
+        self.assertNotIn(second, result.rule3.final)
+
+    def test_d_synthetic_one_player_season_row_covers_every_flag(self):
+        # synthetic: 0 real rows. x holds `partial_join` and two ids at once, and one row covers both.
+        first, second = hand_group("m1", name="Kike Garcia"), hand_group("m2", name="Enrique Lopez")
+        rosters = {("m1", "A"): hand_roster(("x", "Kike Garcia")), ("m2", "A"): hand_roster(("y", "Enrique Lopez")), ("m4", "A"): hand_roster(("z", "Ana"))}
+        rows_of = {first: 19, second: 1, hand_group("m4", name="Nobody"): 19}
+        allowed = decision("cross_season_ids", "1", "approve")
+        self.assertEqual(hand_run(rows_of, rosters, [allowed], [("ESP", 2022, "x")]).flags[("ESP", 2022, "x")], {"partial_join", "two ids"})
+        self.assertEqual(hand_run(rows_of, rosters, [allowed, decision("player_season", "ESP|2021|x", "approve")], [("ESP", 2022, "x")]).pool, [("ESP", 2022, "x")])
+
+    def test_d_synthetic_player_season_key_exists_for_any_flagged_candidate(self):
+        # synthetic: 0 real rows. No flag, no key: the row stops as stale.
+        group = hand_group("m1")
+        rosters = {("m1", "A"): hand_roster(("x", "Kike"))}
+        self.assert_stops("stale", rows_of={group: 1}, rosters=rosters, decisions=[decision("player_season", "ESP|2021|x", "approve")], candidates=[("ESP", 2022, "x")])
+        _, _, rows_of, flagged_rosters = unjoined_case()
+        self.assertEqual(hand_run(rows_of, flagged_rosters, [decision("player_season", "ESP|2021|x", "reject")], [("ESP", 2022, "x")]).pool, [])
+
+    def test_d_synthetic_link_to_player_season_reruns_every_check(self):
+        # synthetic: 0 real rows. c has no shots and x is at 1 of 2, so the combined record is still partial and stays held.
+        _, _, rows_of, rosters = unjoined_case()
+        rosters = {**rosters, ("m3", "A"): hand_roster(("c", "Carlos"))}
+        result = hand_run(rows_of, rosters, [decision("player_season", "ESP|2021|c", "link_to", "x")], lambda positions: [("ESP", 2022, fbref_id) for fbref_id in ("c", "x") if fbref_id in set(positions["fbref_id"])])
+        self.assertEqual(result.flags[("ESP", 2022, "x")], {"partial_join"})
+        self.assertEqual(result.pool, [])
+        # The guard runs again too: 900 agrees with x's 900, and 900 against the combined 1400 does not, so the link goes.
+        mapped = hand_group("m1")
+        facts = hand_facts({"x": 900, "c": 500})
+        rosters = {("m1", "A"): hand_roster(("x", "Kike Garcia")), ("m3", "A"): hand_roster(("c", "Carlos"))}
+        again = hand_run({mapped: 1}, rosters, [decision("player_season", "ESP|2021|c", "link_to", "x")], [("ESP", 2022, "c")], facts=facts)
+        self.assertEqual(again.rule3.guard[join.PlayerSeasonName("ESP", 2021, 1, "Kike", "x")], ("disagree", 900, 1400))
+        self.assertEqual(again.rule3.final, {})
+        # And a link the guard took away comes back when the combined minutes agree: 900 against 450 and 450.
+        back = hand_run({mapped: 1}, rosters, [decision("player_season", "ESP|2021|c", "link_to", "x")], [("ESP", 2022, "c")], facts=hand_facts({"x": 450, "c": 450}))
+        self.assertEqual(back.rule3.final, {mapped: ("map", "x")})
+        # An approval covers every match of the pair, and a combined record keeps it.
+        matches = {hand_group("m1"): 1, hand_group("m2"): 1}
+        two_matches = {("m1", "A"): hand_roster(("x", "Kike Garcia")), ("m2", "A"): hand_roster(("x", "Kike Garcia")), ("m3", "A"): hand_roster(("c", "Carlos")), ("m4", "A"): hand_roster(("y", "Yago"))}
+        rows = [decision("name_map", "ESP|2021|1|Kike|x", "approve"), decision("player_season", "ESP|2021|x", "link_to", "y")]
+        kept = hand_run(matches, two_matches, rows, [], [join.RefusedMerge("ESP", 2022, "Kike", ("x", "y"), "both ids in other seasons")], facts=hand_facts({"x": 100, "y": 100}))
+        self.assertEqual(kept.rule3.final, {hand_group("m1"): ("map", "y"), hand_group("m2"): ("map", "y")})
+        self.assertEqual(kept.rule3.guard[join.PlayerSeasonName("ESP", 2021, 1, "Kike", "y")][0], "approved")
+        # An anchor link goes through the guard again as well.
+        anchor_rows = {hand_group("m1"): 1, hand_group("m2"): 1, hand_group("m3"): 1}
+        anchor_rosters = {("m1", "A"): hand_roster(("c", "Kike")), ("m2", "A"): hand_roster(("c", "Kike")), ("m3", "A"): hand_roster(("c", "Kike Garcia"), ("w", "Kike Lopez")), ("m4", "A"): hand_roster(("x", "Xavi"))}
+        anchored = hand_run(anchor_rows, anchor_rosters, [decision("player_season", "ESP|2021|c", "link_to", "x")], [], [join.RefusedMerge("ESP", 2022, "Kike", ("c", "x"), "both ids in other seasons")], facts=hand_facts({"c": 900, "x": 500}))
+        self.assertEqual(anchored.rule3.final, {hand_group("m1"): ("exact", "x"), hand_group("m2"): ("exact", "x")})
+        self.assertEqual(anchored.rule3.anchor_guard[join.PlayerSeasonName("ESP", 2021, 1, "Kike", "x")], ("disagree", 900, 1400))
+        # A link a collision took away does not come back from an unrelated combine.
+        collided = {hand_group("m1"): 1, hand_group("m2", 2): 1}
+        collided_rosters = {("m1", "A"): hand_roster(("x", "Kike")), ("m2", "A"): hand_roster(("x", "Kike Garcia")), ("m3", "A"): hand_roster(("c", "Carlos"))}
+        no_return = hand_run(collided, collided_rosters, [decision("player_season", "ESP|2021|c", "link_to", "x")], [("ESP", 2022, "c")], facts=hand_facts({"x": 900, "c": 0}))
+        self.assertEqual(no_return.rule3.final, {})
+
+    def test_d_synthetic_refused_merge_has_a_player_season_key(self):
+        # synthetic: 0 real (design check, merge results). y is outside the Pool, and its key exists.
+        _, rows_of, rosters = refused_case()
+        result = hand_run(rows_of, rosters, [decision("player_season", "ESP|2021|y", "reject")], [], [REFUSED])
+        self.assertEqual(result.refused_merges, [REFUSED])
+
+    def test_d_synthetic_link_to_combines_a_refused_merge(self):
+        # synthetic: 0 real.
+        _, rows_of, rosters = refused_case()
+        result = hand_run(rows_of, rosters, [decision("player_season", "ESP|2021|y", "link_to", "x")], [], [REFUSED])
+        self.assertEqual(set(result.positions["fbref_id"]), {"x"})
+
+    def test_d_synthetic_reject_keeps_a_refused_merge_apart(self):
+        # synthetic: 0 real.
+        _, rows_of, rosters = refused_case()
+        result = hand_run(rows_of, rosters, [decision("player_season", "ESP|2021|y", "reject")], [], [REFUSED])
+        self.assertEqual(set(result.positions["fbref_id"]), {"x", "y"})
+        self.assertEqual(result.refused_merges, [REFUSED])
+        self.assertEqual(result.flags, {})
+
+    def test_d_synthetic_approve_on_refused_merge_stops(self):
+        # synthetic: 0 real (design check, merge results).
+        _, rows_of, rosters = refused_case()
+        self.assert_stops("reject", "link_to", rows_of=rows_of, rosters=rosters, decisions=[decision("player_season", "ESP|2021|y", "approve")], refused=[REFUSED])
+
+    def test_d_synthetic_opposite_link_to_on_refused_merge_stops(self):
+        # synthetic: 0 real (design check, merge results).
+        _, rows_of, rosters = refused_case()
+        rows = [decision("player_season", "ESP|2021|y", "link_to", "x"), decision("player_season", "ESP|2021|x", "link_to", "y")]
+        self.assert_stops("ESP|2021|x", "ESP|2021|y", rows_of=rows_of, rosters=rosters, decisions=rows, refused=[REFUSED])
+
+    def test_d_synthetic_reject_and_link_to_on_one_refused_merge_stop(self):
+        # synthetic: 0 real (design check, merge results).
+        _, rows_of, rosters = refused_case()
+        rows = [decision("player_season", "ESP|2021|y", "link_to", "x"), decision("player_season", "ESP|2021|x", "reject")]
+        self.assert_stops("ESP|2021|x", "ESP|2021|y", rows_of=rows_of, rosters=rosters, decisions=rows, refused=[REFUSED])
+
+    def test_d_synthetic_link_to_joins_an_unflagged_unjoined_row(self):
+        # synthetic: 0 real rows. Marc Cardona's own target has no FBref row in that match, so on his data the row stops (D39).
+        joined, unjoined, _, rosters = unjoined_case()
+        result = hand_run({joined: 19, unjoined: 1}, rosters, [decision("partial_join", "ESP|2021|1", "link_to", "z"), decision("cross_season_ids", "1", "approve")])
+        self.assertEqual(result.rule3.final[unjoined], ("reviewed", "z"))
+        self.assertNotIn(("ESP", 2021, 1), hand_run({joined: 19, unjoined: 1}, rosters).partial)
+        with self.assertRaises(SystemExit) as stop:
+            sample_finish([decision("partial_join", "ESP|2023|5159", "link_to", "b92b456a")])
+        self.assertIn("no FBref row in match b5b5ee07", str(stop.exception))
+
+    def test_d_synthetic_partial_join_key_with_no_unjoined_row_is_stale(self):
+        # synthetic: 0 real rows.
+        group = hand_group("m1")
+        self.assert_stops("stale", rows_of={group: 1}, rosters={("m1", "A"): hand_roster(("x", "Kike"))}, decisions=[decision("partial_join", "ESP|2021|1", "reject")])
+
+    def test_d_synthetic_approve_on_unflagged_partial_join_stops(self):
+        # synthetic: hand-made row on Marc Cardona, 21 of 22 (design check).
+        with self.assertRaises(SystemExit) as stop:
+            sample_finish([decision("partial_join", "ESP|2023|5159", "approve")])
+        self.assertIn("link_to", str(stop.exception))
+
+    def test_d_synthetic_reject_on_unflagged_partial_join_leaves_rows_unjoined(self):
+        # synthetic: hand-made row on Marc Cardona (design check).
+        result = sample_finish([decision("partial_join", "ESP|2023|5159", "reject")])
+        self.assertNotIn(sample_groups_of(*CARDONA_GROUP)[0], result.rule3.final)
+        self.assertIn(("ESP", 2023, 5159), result.unjoined_listed)
+
+    def test_d_synthetic_unknown_item_type_stops(self):
+        # synthetic: 0 real rows.
+        self.assert_file_stops("nonsense,k,approve,,x,y,z\n", "nonsense")
+
+    def test_d_synthetic_unknown_decision_stops(self):
+        # synthetic: 0 real rows.
+        self.assert_file_stops("name_map,k,maybe,,x,y,z\n", "maybe")
+
+    def test_d_synthetic_link_to_without_fbref_id_stops(self):
+        # synthetic: 0 real rows.
+        self.assert_file_stops("name_map,k,link_to,,x,y,z\n", "fbref_id", "link_to")
+
+    def test_d_synthetic_merge_ids_without_fbref_id_stops(self):
+        # synthetic: 0 real rows.
+        self.assert_file_stops("name_map,k,merge_ids,,x,y,z\n", "fbref_id", "merge_ids")
+
+    def test_d_synthetic_link_to_fbref_id_outside_league_season_stops(self):
+        # synthetic: 0 real rows.
+        _, _, rows_of, rosters = unjoined_case()
+        self.assert_stops("nobody", "league-season", rows_of=rows_of, rosters=rosters, decisions=[decision("partial_join", "ESP|2021|1", "link_to", "nobody")])
+
+    def test_d_synthetic_link_to_target_not_in_those_matches_stops(self):
+        # synthetic: 0 real rows. x plays in that league-season, in m1, and not in m2, where the unjoined row is.
+        _, _, rows_of, rosters = unjoined_case()
+        self.assert_stops("x", "m2", rows_of=rows_of, rosters=rosters, decisions=[decision("partial_join", "ESP|2021|1", "link_to", "x")])
+
+    def test_d_synthetic_merge_ids_fbref_id_outside_league_season_stops(self):
+        # synthetic: 0 real rows.
+        _, _, rows_of, rosters = collision_case()
+        self.assert_stops("nobody", "league-season", rows_of=rows_of, rosters=rosters, decisions=[decision("name_map", "ESP|2021|2|Kike|x", "merge_ids", "nobody")])
+
+    def test_d_synthetic_fbref_id_on_other_decision_stops(self):
+        # synthetic: 0 real rows.
+        self.assert_file_stops("name_map,k,approve,x,x,y,z\n", "fbref_id", "approve")
+
+    def test_d_synthetic_merge_ids_on_player_season_stops(self):
+        # synthetic: 0 real rows.
+        self.assert_file_stops("player_season,k,merge_ids,x,x,y,z\n", "merge_ids", "player_season")
+
+    def test_d_synthetic_merge_ids_without_second_id_stops(self):
+        # synthetic: 0 real rows.
+        group = hand_group("m1")
+        rosters = {("m1", "A"): hand_roster(("x", "Kike Garcia"), ("z", "Enrique"))}
+        self.assert_stops("merge_ids", "second", rows_of={group: 1}, rosters=rosters, decisions=[decision("name_map", "ESP|2021|1|Kike|x", "merge_ids", "z")])
+
+    def test_d_synthetic_two_rows_on_one_key_stop(self):
+        # synthetic: 0 real rows.
+        self.assert_file_stops("name_map,k,approve,,x,y,z\nname_map,k,reject,,x,y,z\n", "two rows", "k")
+
+    def test_d_synthetic_approve_and_reject_on_two_keys_of_one_player_stop(self):
+        # synthetic: hand-made rows on Dennis Johnsen, in both directions.
+        for first, second in (("approve", "reject"), ("reject", "approve")):
+            with self.assertRaises(SystemExit) as stop:
+                sample_finish([decision("player_season", JOHNSEN_KEYS[0], first), decision("partial_join", JOHNSEN_KEYS[1], second)])
+            self.assertIn(JOHNSEN_KEYS[0], str(stop.exception))
+            self.assertIn(JOHNSEN_KEYS[1], str(stop.exception))
+
+    def test_d_synthetic_player_season_without_shots_stops(self):
+        # synthetic: 0 real rows.
+        _, rows_of, rosters = no_shots_case()
+        self.assert_stops("no joined shots", "partial_join", rows_of=rows_of, rosters=rosters, decisions=[decision("player_season", "ESP|2021|c", "approve")], candidates=[("ESP", 2022, "c")])
+
+    def test_d_synthetic_two_understat_ids_without_merge_ids_stop(self):
+        # synthetic: 0 real rows.
+        group, other = hand_group("m1"), hand_group("m1", understat_id=2, name="Enrique")
+        rosters = {("m1", "A"): hand_roster(("x", "Kike")), ("m2", "A"): hand_roster(("z", "Ana"))}
+        rows = {group: 1, other: 1, hand_group("m2", understat_id=2, name="Nobody"): 1}
+        self.assert_stops("merge_ids", "[1, 2]", rows_of=rows, rosters=rosters, decisions=[decision("partial_join", "ESP|2021|2", "link_to", "x")], positions=positions_of({**rosters, ("m2", "A"): hand_roster(("x", "Kike"))}))
+
+    def test_d_synthetic_approve_with_two_understat_ids_stops(self):
+        # synthetic: 0 real rows.
+        _, _, rows_of, rosters = collision_case()
+        rows = [decision("name_map", "ESP|2021|1|Kike|x", "approve"), decision("name_map", "ESP|2021|2|Kike|x", "approve")]
+        self.assert_stops("merge_ids", "[1, 2]", rows_of=rows_of, rosters=rosters, decisions=rows)
+
+    def test_d_synthetic_row_order_does_not_change_the_result(self):
+        # synthetic: 0 real rows.
+        _, _, rows_of, rosters, first_key, second_key = stopped_case()
+        rows = [decision("name_map", first_key, "approve"), decision("name_map", second_key, "link_to", "z"), decision("cross_season_ids", "1", "approve")]
+        forward, backward = hand_run(rows_of, rosters, rows), hand_run(rows_of, rosters, rows[::-1])
+        self.assertEqual((forward.rule3.final, forward.flags, forward.partial, forward.pool), (backward.rule3.final, backward.flags, backward.partial, backward.pool))
+        # A rejected link stays out, whichever row names the same rows, and whichever id of a collision the reject is on.
+        group, unjoined = hand_group("m1"), hand_group("m2")
+        link_rosters = {("m1", "A"): hand_roster(("x", "Kike Garcia"), ("z", "Enrique")), ("m2", "A"): hand_roster(("z", "Enrique"))}
+        both = [decision("name_map", "ESP|2021|1|Kike|x", "reject"), decision("partial_join", "ESP|2021|1", "link_to", "z")]
+        for order in (both, both[::-1]):
+            self.assertEqual(hand_run({group: 1, unjoined: 1}, link_rosters, order).rule3.final, {unjoined: ("reviewed", "z")})
+        _, _, collided, collision_rosters = collision_case()
+        for rejected, merged in ((1, 2), (2, 1)):
+            mixed = [decision("name_map", f"ESP|2021|{rejected}|Kike|x", "reject"), decision("name_map", f"ESP|2021|{merged}|Kike|x", "merge_ids", "x")]
+            for order in (mixed, mixed[::-1]):
+                self.assert_stops("no second", rows_of=collided, rosters=collision_rosters, decisions=order)
+        # The listed rows keep one order too, and a chain of `link_to` rows stops rather than depending on how the ids sort.
+        second_collision = {hand_group("m5", 3): 1, hand_group("m6", 4): 1}
+        two_collisions = {**collided, **second_collision}
+        rosters_of_two = {**collision_rosters, ("m5", "A"): hand_roster(("y", "Kike")), ("m6", "A"): hand_roster(("y", "Kike"))}
+        merges = [decision("name_map", "ESP|2021|2|Kike|x", "merge_ids", "x"), decision("name_map", "ESP|2021|4|Kike|y", "merge_ids", "y")]
+        self.assertEqual(hand_run(two_collisions, rosters_of_two, merges[::-1]).merge_ids_rows, merges)
+        _, _, chain_rows, chain_rosters = unjoined_case()
+        chain_rosters = {**chain_rosters, ("m3", "A"): hand_roster(("c", "Carlos")), ("m4", "A"): hand_roster(("d", "Dani"))}
+        chain = [decision("player_season", "ESP|2021|c", "link_to", "d"), decision("player_season", "ESP|2021|d", "link_to", "x")]
+        self.assert_stops("has its own link_to", rows_of=chain_rows, rosters=chain_rosters, decisions=chain, candidates=[("ESP", 2022, "c"), ("ESP", 2022, "d")])
+
+    def test_d_synthetic_partial_join_is_recomputed_after_decisions(self):
+        # synthetic: 0 real rows.
+        _, _, rows_of, rosters = unjoined_case()
+        self.assertIn(("ESP", 2021, 1), hand_run(rows_of, rosters).partial)
+        self.assertNotIn(("ESP", 2021, 1), hand_run(rows_of, rosters, [decision("partial_join", "ESP|2021|1", "link_to", "z"), decision("cross_season_ids", "1", "approve")]).partial)
+
+    def test_d_pool_count_is_returned_before_and_after_decisions(self):
+        result = sample_finished()
+        self.assertEqual(result.pool_after, len(result.pool))
+        self.assertEqual(result.pool_before, sample_finish([]).pool_after)
+        self.assertEqual(sample_finish([*sample_decisions(), decision("player_season", JOHNSEN_KEYS[0], "approve")]).pool_after, result.pool_after + 1)
+
+    def test_d_synthetic_two_fbref_ids_fail_the_run(self):
+        # synthetic: 0 real with merges on (design check).
+        first, second = hand_group("m1", name="Kike Garcia"), hand_group("m2", name="Enrique Lopez", season=2022)
+        rosters = {("m1", "A"): hand_roster(("x", "Kike Garcia")), ("m2", "A"): hand_roster(("y", "Enrique Lopez"))}
+        self.assert_stops("cross_season_ids", "1", "x", "y", rows_of={first: 1, second: 1}, rosters=rosters)
+
+    def test_d_synthetic_cross_season_row_allows_two_ids(self):
+        # synthetic: 0 real rows.
+        first, second = hand_group("m1", name="Kike Garcia"), hand_group("m2", name="Enrique Lopez", season=2022)
+        rosters = {("m1", "A"): hand_roster(("x", "Kike Garcia")), ("m2", "A"): hand_roster(("y", "Enrique Lopez"))}
+        result = hand_run({first: 1, second: 1}, rosters, [decision("cross_season_ids", "1", "approve")])
+        self.assertEqual(result.cross_season_cases, [(1, ("x", "y"))])
+        # A second id that a decision made holds a candidate, as one from rule 3 does.
+        _, _, rows_of, unjoined_rosters = unjoined_case()
+        made = hand_run(rows_of, unjoined_rosters, [decision("partial_join", "ESP|2021|1", "link_to", "z"), decision("cross_season_ids", "1", "approve")], [("ESP", 2022, "x")])
+        self.assertIn("two ids", made.flags[("ESP", 2022, "x")])
+        self.assertEqual(made.pool, [])
+
+    def test_d_synthetic_cross_season_row_accepts_only_approve(self):
+        # synthetic: 0 real rows.
+        self.assert_file_stops("cross_season_ids,1,reject,,x,y,z\n", "cross_season_ids", "approve")
+
+    def test_d_synthetic_cross_season_row_stale_stops(self):
+        # synthetic: 0 real rows.
+        group = hand_group("m1")
+        self.assert_stops("stale", "cross_season_ids", rows_of={group: 1}, rosters={("m1", "A"): hand_roster(("x", "Kike"))}, decisions=[decision("cross_season_ids", "1", "approve")])
+
+    def test_d_merges_off_skips_the_cross_season_check(self):
+        unmerged = join.positions_for_join(SAMPLE, merges=False)
+        off = sample_finish([], unmerged, merges_on=False)
+        ids = {link[1] for group, link in off.rule3.final.items() if group.understat_id == 7944 and group.season == 2023}
+        self.assertEqual(ids, STREFEZZA_IDS)
+        self.assertEqual(off.cross_season_cases, [])
+        rows_of = join.shot_groups(sample_shots(), join.link_matches(sample_shots(), unmerged, sample_clubs()).links, unmerged)[0]
+        facts = join.guard_facts(unmerged, sample_shots(), join.season_rows_by_name(sample_clubs(), SAMPLE))
+        with self.assertRaises(SystemExit) as stop:
+            join.finish_join(join.rule3_links(rows_of, join.build_rosters(unmerged), facts), rows_of, join.build_rosters(unmerged), unmerged, [], [], lambda found: [], facts, True)
+        self.assertIn("cross_season_ids", str(stop.exception))
+        # A key that exists only on merged ids stops the merges-on run, and the merges-off run passes over it.
+        row = decision("player_season", "ITA|2023|nobody", "reject")
+        self.assertEqual(sample_finish([row], unmerged, merges_on=False).joined_after, off.joined_after)
+        with self.assertRaises(SystemExit):
+            sample_finish([row])
+        # So does a row good only on merged ids: the survivor has no FBref row in this match until the merge.
+        _, _, rows_of, rosters = unjoined_case()
+        moved = decision("partial_join", "ESP|2021|1", "link_to", "x")
+        self.assertEqual(hand_run(rows_of, rosters, [moved], merges_on=False).joined_after, 2)
+        with self.assertRaises(SystemExit):
+            hand_run(rows_of, rosters, [moved])
+
+
+class MovedFromTheOldTestFile(unittest.TestCase):
+    """The real cases of tests/test_measure_rule3.py and the asserts of the script's old self_check."""
+
+    def test_angel_passes_the_minutes_guard(self):
+        pair = join.PlayerSeasonName("ESP", 2020, 4136, "Ángel", "8cfc2f69")
+        self.assertEqual(sample_rule3().guard[pair][0], "agree")
+
+    def test_chema_reaches_angel_but_does_not_link(self):
+        for match in ("92f705d2", "add782a1"):
+            group = sample_groups_of("ESP", 2020, 6216, match)[0]
+            self.assertIn("8cfc2f69", sample_name_map().undecided[group])
+            self.assertNotIn(group, sample_rule3().final)
+
+    def test_chema_is_flagged_partial_join_and_angel_is_not(self):
+        self.assertNotIn(("ESP", 2020, 4136), sample_partial())
+        self.assertIn(("ESP", 2020, 6216), sample_partial())
+
+    def test_hwang_links_in_all_three_seasons_at_step_2_only(self):
+        for season in (2021, 2022, 2023):
+            for group in sample_groups_of("ENG", season, 8845):
+                self.assertNotIn(group, sample_joined())
+                self.assertEqual(sample_name_map().links[group], "169fd162")
+
+    def test_name_rules(self):
+        self.assertEqual(join.compared_name("Kylian Mbappe-Lottin"), "kylian mbappe lottin")
+        self.assertEqual(join.compared_name("Martin Ødegaard"), join.compared_name("Martin Odegaard"))
+        self.assertEqual(join.compared_name("N&#039;Golo Kanté"), "ngolo kante")
+        self.assertTrue(join.is_name_map_candidate(["bruno"], ["bruno", "fernandes"]))
+        self.assertTrue(join.is_name_map_candidate(["kylian", "mbappe", "lottin"], ["kylian", "mbappe"]))
+        self.assertFalse(join.is_name_map_candidate(["bruno"], ["brunos", "fernandes"]))
+        self.assertTrue(join.is_name_map_candidate(["fernandes", "bruno"], ["bruno", "miguel", "fernandes"]))
 
 
 if __name__ == "__main__":

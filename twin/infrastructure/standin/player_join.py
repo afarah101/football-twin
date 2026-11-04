@@ -21,6 +21,11 @@ FOLDED_LETTERS = str.maketrans({"ø": "o", "ð": "d", "đ": "dj", "ı": "i", "ł
 MIN_ANCHOR_MATCHES = 2
 FULL_JOIN_PERCENT = 95
 ATTACKING_POS = {"FW", "LW", "RW", "AM"}
+LINK_ITEM_TYPES = {"name_map", "season_anchor"}
+ITEM_TYPES = LINK_ITEM_TYPES | {"partial_join", "player_season", "cross_season_ids"}
+DECISIONS = {"approve", "reject", "link_to", "merge_ids"}
+# Links first, then what is left unjoined, then whole records, so one order holds whatever order Ahmed's rows are in.
+ROW_ORDER = {"cross_season_ids": 0, "name_map": 1, "season_anchor": 2, "partial_join": 3, "player_season": 4}
 
 
 @dataclass(frozen=True)
@@ -150,6 +155,28 @@ class Rule3(NamedTuple):
     after_anchor_guard: dict
     collisions: dict
     final: dict
+
+
+class JoinResult(NamedTuple):
+    """The final join, after the review decisions. `rule3` holds the links and verdicts as the decisions left them."""
+    rule3: Rule3
+    positions: pd.DataFrame
+    candidates: list
+    flags: dict
+    pool: list
+    partial: dict
+    pool_before: int
+    pool_after: int
+    joined_before: int
+    joined_after: int
+    collisions: dict
+    merge_ids_rows: list
+    merged_collisions: list
+    anchors_removed: list
+    cross_season_cases: list
+    combined_outside_pool: list
+    refused_merges: list
+    unjoined_listed: list
 
 
 def without_tie_breakers(positions):
@@ -451,8 +478,8 @@ def season_totals_row(facts, league, season, shot_names, fbref_id):
     return rows[0] if len(rows) == 1 else None
 
 
-def minutes_guard(pairs, facts, approved_keys=frozenset()):
-    """One verdict per player-season name and FBref id: agree, disagree, approved or none, with both minutes."""
+def minutes_guard(pairs, facts):
+    """One verdict per player-season name and FBref id: agree, disagree or none, with both minutes. Only a review decision can make it `approved`."""
     results = {}
     for pair in sorted(pairs):
         names = facts.shot_names.get((pair.league, pair.season, pair.understat_id), {html.unescape(pair.name)})
@@ -461,8 +488,7 @@ def minutes_guard(pairs, facts, approved_keys=frozenset()):
         if row is None:
             results[pair] = ("none", None, fbref)
             continue
-        within = abs(row.minutes - fbref) <= minutes_limit(row.minutes, fbref)
-        results[pair] = ("agree" if within else "approved" if decision_key(pair) in approved_keys else "disagree", row.minutes, fbref)
+        results[pair] = ("agree" if abs(row.minutes - fbref) <= minutes_limit(row.minutes, fbref) else "disagree", row.minutes, fbref)
     return results
 
 
@@ -489,7 +515,7 @@ def id_collisions(joined):
     return {key: sorted(found) for key, found in sorted(ids.items()) if len(found) > 1}
 
 
-def rule3_links(rows_of, rosters, facts, approved_keys=frozenset()):
+def rule3_links(rows_of, rosters, facts):
     """Exact, step 1, step 2, the guard, step 3, the guard on its links, then id collisions. Plan lines 129 to 136, in that order."""
     groups = sorted(rows_of)
     joined = join_by_name(groups, rosters)
@@ -499,7 +525,7 @@ def rule3_links(rows_of, rosters, facts, approved_keys=frozenset()):
     for group, pair in pair_of.items():
         name_map_rows[pair] += rows_of[group]
         matches_of[pair] += 1
-    guard = minutes_guard(name_map_rows, facts, approved_keys)
+    guard = minutes_guard(name_map_rows, facts)
     after_step_2 = links_after_step_2(joined, name_map)
     after_guard = {group: link for group, link in after_step_2.items() if link[0] != "map" or guard[pair_of[group]][0] != "disagree"}
     anchors = season_anchor_links(name_map.undecided, after_guard, name_map.conflicts)
@@ -508,7 +534,7 @@ def rule3_links(rows_of, rosters, facts, approved_keys=frozenset()):
     for group, pair in anchor_pair_of.items():
         anchor_rows[pair] += rows_of[group]
         anchor_matches[pair] += 1
-    anchor_guard = minutes_guard(anchor_rows, facts, approved_keys)
+    anchor_guard = minutes_guard(anchor_rows, facts)
     after_anchor = {**after_guard, **{group: ("season_anchor", fbref_id) for group, fbref_id in anchors.links.items()}}
     after_anchor_guard = {group: link for group, link in after_anchor.items() if link[0] != "season_anchor" or anchor_guard[anchor_pair_of[group]][0] != "disagree"}
     collisions = id_collisions(after_anchor_guard)
@@ -590,3 +616,318 @@ def review_flags(candidates, final, partial, two_ids):
 def pool_of(candidates, flags):
     """A flagged candidate stays out of the Pool until Ahmed reviews it."""
     return [candidate for candidate in candidates if candidate not in flags]
+
+
+def read_review_decisions(path=DATA / "review_decisions.csv"):
+    """Every row of Ahmed's file, checked on its own. The stops that need the join's output are in `finish_join`."""
+    # utf-8-sig: spreadsheets save this hand-edited file with a byte order mark.
+    with path.open(encoding="utf-8-sig", newline="") as handle:
+        decisions = list(csv.DictReader(handle))
+    for row in decisions:
+        if row["item_type"] not in ITEM_TYPES or row["decision"] not in DECISIONS:
+            raise SystemExit(f"{path.name}: unknown item_type or decision: {row}")
+        needs_id = row["decision"] in ("link_to", "merge_ids")
+        if needs_id != bool(row["fbref_id"]):
+            raise SystemExit(f"{path.name}: `{row['decision']}` {'needs' if needs_id else 'takes no'} fbref_id: {row}")
+        if row["decision"] == "merge_ids" and row["item_type"] == "player_season":
+            raise SystemExit(f"{path.name}: merge_ids does not apply to player_season: {row}")
+        if row["item_type"] == "cross_season_ids" and row["decision"] != "approve":
+            raise SystemExit(f"{path.name}: cross_season_ids takes only approve: {row}")
+    repeated = sorted(key for key, count in Counter((row["item_type"], row["key"]) for row in decisions).items() if count > 1)
+    if repeated:
+        raise SystemExit(f"{path.name}: two rows on one key: {repeated}")
+    return decisions
+
+
+def partial_join_key(player_season):
+    return "|".join(str(part) for part in player_season)
+
+
+def player_season_key(fbref_key):
+    """(league, FBref year, FBref id) as a review key. Its season is the Understat one, so one season has one number in the whole file."""
+    league, year, fbref_id = fbref_key
+    return f"{league}|{year - 1}|{fbref_id}"
+
+
+def stop(message):
+    raise SystemExit(f"review_decisions.csv: {message}")
+
+
+def link_items(rule3):
+    """Every link a row can name, by (item_type, key): those rule 3 made, including any the guard, the stop, the bar or a collision took away."""
+    items = defaultdict(dict)
+    for group, pair in rule3.pair_of.items():
+        items[("name_map", decision_key(pair))][group] = ("map", pair.fbref_id)
+    for group, fbref_id in rule3.name_map.stopped_links.items():
+        items[("name_map", decision_key(PlayerSeasonName(*group.player_season_name, fbref_id)))][group] = ("map", fbref_id)
+    for (league, season, fbref_id), ids in rule3.collisions.items():
+        for group, link in rule3.after_anchor_guard.items():
+            if link[1] == fbref_id and group.league == league and group.season == season and group.understat_id in ids:
+                items[("name_map", decision_key(PlayerSeasonName(*group.player_season_name, fbref_id)))][group] = link
+    for links in (rule3.anchors.links, rule3.anchors.barred):
+        for group, fbref_id in links.items():
+            items[("season_anchor", decision_key(PlayerSeasonName(*group.player_season_name, fbref_id)))][group] = ("season_anchor", fbref_id)
+    return items
+
+
+def understat_ids_on(fbref_key, links):
+    """The player-seasons whose links reach this PlayerSeason, keyed as `partial_join` is."""
+    league, year, fbref_id = fbref_key
+    return {group.player_season for group, link in links.items() if link[1] == fbref_id and group.league == league and group.season == year - 1}
+
+
+def check_cases_agree(rows, first_links, refused):
+    """D36 and D37: rows on different keys for one case must agree. The two-row rule only sees one key."""
+    by_key = {(row["item_type"], row["key"]): row for row in rows}
+    for row in rows:
+        if row["item_type"] != "player_season":
+            continue
+        league, season, fbref_id = row["key"].split("|")
+        for player_season in understat_ids_on((league, int(season) + 1, fbref_id), first_links):
+            other = by_key.get(("partial_join", partial_join_key(player_season)))
+            if other and {row["decision"], other["decision"]} == {"approve", "reject"}:
+                stop(f"{row['decision']} on player_season {row['key']} and {other['decision']} on partial_join {other['key']} disagree. Keep one.")
+    for case in refused:
+        keys = [player_season_key((case.league, case.year, fbref_id)) for fbref_id in case.ids]
+        found = [by_key[("player_season", key)] for key in keys if ("player_season", key) in by_key]
+        if any(row["decision"] == "approve" for row in found):
+            stop(f"approve on a refused merge {keys}: use reject, or link_to to combine the ids")
+        if len(found) > 1 and any(row["decision"] == "link_to" for row in found):
+            stop(f"rows on one refused merge disagree: {[(row['key'], row['decision'], row['fbref_id']) for row in found]}. Keep one.")
+
+
+def drop_anchors_without_evidence(rule3, rows, items, links):
+    """Step 3 again, without the links Ahmed took away or moved: an anchor resting on them goes, unless its own row kept it. Returns what went, for the report."""
+    changed = {group for row in rows if row["item_type"] in LINK_ITEM_TYPES and row["decision"] != "approve" for group in items[(row["item_type"], row["key"])]}
+    if not changed:
+        return []
+    own_rows = {group for row in rows if row["item_type"] == "season_anchor" for group in items[("season_anchor", row["key"])]}
+    evidence = {group: link for group, link in rule3.after_guard.items() if group not in changed}
+    still_anchored = season_anchor_links(rule3.name_map.undecided, evidence, rule3.name_map.conflicts).links
+    removed = [group for group, link in links.items() if link[0] == "season_anchor" and group not in still_anchored and group not in own_rows]
+    for group in removed:
+        del links[group]
+    return sorted(removed)
+
+
+def finish_join(rule3, rows_of, rosters, positions, decisions, refused, candidates_of, facts, merges_on=True):
+    """Plan lines 142 to 146: apply Ahmed's rows after rule 3, then every check again. Rows are sorted, and the checks run after them all, so order never matters."""
+    rows = sorted(decisions, key=lambda row: (ROW_ORDER[row["item_type"]], row["key"]))
+    candidates = candidates_of(positions)
+    candidate_set = set(candidates)
+    partial_before = partial_joins(rows_of, rule3.final)
+    flags_before = review_flags(candidates, rule3.final, partial_before, rule3.name_map.two_ids)
+    items = link_items(rule3)
+    counts = join_counts(rows_of, rule3.final)
+    partial_keys = {partial_join_key(key): key for key, (found, total) in counts.items() if found < total}
+    refused_ids = {player_season_key((case.league, case.year, fbref_id)) for case in refused for fbref_id in case.ids}
+    season_keys = {player_season_key(key): key for key in flags_before if key in candidate_set}
+    season_keys.update({player_season_key((case.league, case.year, fbref_id)): (case.league, case.year, fbref_id) for case in refused for fbref_id in case.ids})
+    in_league_season = set(zip(positions["league"], positions["Season_End_Year"], positions["fbref_id"]))
+    ids_in_match = defaultdict(set)
+    for match, fbref_id in zip(positions["match"], positions["fbref_id"]):
+        ids_in_match[match].add(fbref_id)
+
+    def key_exists(row):
+        kind, key = row["item_type"], row["key"]
+        return (kind, key) in items if kind in LINK_ITEM_TYPES else key in partial_keys if kind == "partial_join" else key in season_keys if kind == "player_season" else True
+
+    if not merges_on:
+        # The file's keys name merged ids, and this run exists only for the before-merge numbers (D21).
+        rows = [row for row in rows if key_exists(row) and (not row["fbref_id"] or (row["key"].split("|")[0], int(row["key"].split("|")[1]) + 1, row["fbref_id"]) in in_league_season)]
+    for row in rows:
+        kind, key = row["item_type"], row["key"]
+        if not key_exists(row):
+            stop(f"stale decision, key not in the data: {kind} {key}")
+        if row["fbref_id"]:
+            league, season = key.split("|")[:2]
+            if (league, int(season) + 1, row["fbref_id"]) not in in_league_season:
+                stop(f"{row['decision']} on {key}: {row['fbref_id']} is not in that league-season")
+    check_cases_agree(rows, rule3.final, refused)
+
+    def must(holds, message):
+        """The merges-off run exists only for the before-merge numbers: a row that is good on merged ids must not stop it (D21)."""
+        if merges_on and not holds:
+            stop(message)
+
+    def move_rows(groups, row):
+        for group in groups:
+            must(row["fbref_id"] in ids_in_match[group.match], f"{row['decision']} on {row['key']}: {row['fbref_id']} has no FBref row in match {group.match}")
+        links.update({group: ("reviewed", row["fbref_id"]) for group in groups})
+
+    links, guard, pair_of = dict(rule3.final), dict(rule3.guard), dict(rule3.pair_of)
+    name_map_rows, matches_of = Counter(rule3.name_map_rows), Counter(rule3.matches_of)
+    anchor_guard, anchor_pair_of = dict(rule3.anchor_guard), dict(rule3.anchor_pair_of)
+    anchor_rows, anchor_matches = Counter(rule3.anchor_rows), Counter(rule3.anchor_matches)
+    # A rejected link stays out, whichever other row could bring its rows back.
+    rejected_groups = {group for row in rows if row["item_type"] in LINK_ITEM_TYPES and row["decision"] == "reject" for group in items[(row["item_type"], row["key"])]}
+    approved_partial, kept_partial, approved_seasons, rejected_seasons, unjoined_listed = set(), set(), set(), set(), []
+    merged, touched, combine, merge_rows, allowed_ids, merged_collisions = set(), set(), {}, [], set(), []
+    anchors_removed, anchors_checked = [], False
+    for row in rows:
+        kind, key, verdict = row["item_type"], row["key"], row["decision"]
+        if kind in LINK_ITEM_TYPES:
+            found = items[(kind, key)]
+            league, season = key.split("|")[0], int(key.split("|")[1])
+            link_fbref = key.rsplit("|", 1)[1]
+            in_collision = (league, season, link_fbref) in rule3.collisions
+            if in_collision:
+                touched.add((league, season, link_fbref))
+            if verdict == "approve":
+                links.update(found)
+                for group, link in found.items():
+                    if link[0] == "map":
+                        pair = PlayerSeasonName(*group.player_season_name, link[1])
+                        if group not in pair_of:
+                            pair_of[group] = pair
+                            name_map_rows[pair] += rows_of[group]
+                            matches_of[pair] += 1
+                        if pair not in guard:
+                            guard.update(minutes_guard([pair], facts))
+                        if guard[pair][0] == "disagree":
+                            guard[pair] = ("approved", *guard[pair][1:])
+                    elif link[0] == "season_anchor":
+                        pair = PlayerSeasonName(*group.player_season_name, link[1])
+                        if group not in anchor_pair_of:
+                            anchor_pair_of[group] = pair
+                            anchor_rows[pair] += rows_of[group]
+                            anchor_matches[pair] += 1
+                        if pair not in anchor_guard:
+                            anchor_guard.update(minutes_guard([pair], facts))
+                        if anchor_guard[pair][0] == "disagree":
+                            anchor_guard[pair] = ("approved", *anchor_guard[pair][1:])
+            elif verdict == "reject":
+                for group in found:
+                    links.pop(group, None)
+            else:
+                move_rows(found, row)
+                if verdict == "merge_ids":
+                    merge_rows.append(row)
+                    merged.add((league, season, row["fbref_id"]))
+                    collision_key = (league, season, row["fbref_id"])
+                    collision_ids = rule3.collisions.get(collision_key, [])
+                    for group, link in rule3.after_anchor_guard.items():
+                        if group.league == league and group.season == season and group.understat_id in collision_ids and link[1] == row["fbref_id"] and group not in rejected_groups:
+                            links.setdefault(group, link)
+                    if collision_ids and (collision_key, collision_ids) not in merged_collisions:
+                        merged_collisions.append((collision_key, collision_ids))
+        elif kind == "partial_join":
+            if not anchors_checked:
+                anchors_checked = True
+                anchors_removed = drop_anchors_without_evidence(rule3, rows, items, links)
+            player_season = partial_keys[key]
+            flagged = player_season in partial_before
+            if verdict == "approve":
+                if not flagged:
+                    stop(f"approve on partial_join {key}: it holds no flag to clear. Use link_to to join its rows, or reject to leave them")
+                approved_partial.add(player_season)
+            elif verdict == "reject":
+                (kept_partial.add(player_season) if flagged else unjoined_listed.append(player_season))
+            else:
+                move_rows([group for group in rows_of if group.player_season == player_season and group not in links and group not in rejected_groups], row)
+                if verdict == "merge_ids":
+                    merge_rows.append(row)
+                    merged.add((player_season[0], player_season[1], row["fbref_id"]))
+        elif kind == "player_season":
+            season_key = season_keys[key]
+            if verdict == "approve":
+                approved_seasons.add(season_key)
+                approved_partial |= understat_ids_on(season_key, rule3.final)
+            elif verdict == "reject":
+                if season_key in flags_before:
+                    rejected_seasons.add(season_key)
+                    kept_partial |= understat_ids_on(season_key, rule3.final)
+            else:
+                combine[season_key] = row["fbref_id"]
+        else:
+            allowed_ids.add(key)
+
+    if not anchors_checked:
+        anchors_removed = drop_anchors_without_evidence(rule3, rows, items, links)
+
+    for (league, year, old_id), new_id in sorted(combine.items()):
+        if (league, year, new_id) in combine:
+            stop(f"link_to on {player_season_key((league, year, old_id))} names {new_id}, and {player_season_key((league, year, new_id))} has its own link_to. Name the id the record ends under.")
+        here = (positions["league"] == league) & (positions["Season_End_Year"] == year)
+        if set(positions.loc[here & (positions["fbref_id"] == old_id), "match"]) & set(positions.loc[here & (positions["fbref_id"] == new_id), "match"]):
+            stop(f"link_to on {player_season_key((league, year, old_id))}: {old_id} and {new_id} share a match, so they are two players")
+        positions = positions.copy()
+        positions.loc[here & (positions["fbref_id"] == old_id), "fbref_id"] = new_id
+        links = {group: (link[0], new_id) if link[1] == old_id and group.league == league and group.season == year - 1 else link for group, link in links.items()}
+        # Every check runs again on the combined record, the guard with both ids' minutes, names and clubs.
+        old_key, new_key = (league, year, old_id), (league, year, new_id)
+        facts = facts._replace(
+            fbref_minutes={**facts.fbref_minutes, new_key: facts.fbref_minutes.get(new_key, 0) + facts.fbref_minutes.get(old_key, 0)},
+            fbref_names={**facts.fbref_names, new_key: sorted({*facts.fbref_names.get(new_key, []), *facts.fbref_names.get(old_key, [])})},
+            fbref_clubs={**facts.fbref_clubs, new_key: {*facts.fbref_clubs.get(new_key, ()), *facts.fbref_clubs.get(old_key, ())}},
+        )
+        for step, pairs, verdicts, removed_verdicts, row_counts, match_counts in (("map", pair_of, guard, rule3.guard, name_map_rows, matches_of), ("season_anchor", anchor_pair_of, anchor_guard, rule3.anchor_guard, anchor_rows, anchor_matches)):
+            # Read before any row moves: one approval covers every group of a pair, on either id.
+            approved_pairs = {pair for pair, verdict in verdicts.items() if verdict[0] == "approved"}
+            for group, pair in list(pairs.items()):
+                if pair.fbref_id not in (old_id, new_id) or group.league != league or group.season != year - 1:
+                    continue
+                new_pair = pair._replace(fbref_id=new_id)
+                if new_pair != pair:
+                    pairs[group] = new_pair
+                    row_counts[new_pair] += rows_of[group]
+                    row_counts[pair] -= rows_of[group]
+                    match_counts[new_pair] += 1
+                    match_counts[pair] -= 1
+                verdict = minutes_guard([new_pair], facts)[new_pair]
+                kept_by_ahmed = (pair in approved_pairs or new_pair in approved_pairs) and verdict[0] == "disagree"
+                verdicts[new_pair] = ("approved", *verdict[1:]) if kept_by_ahmed else verdict
+                current = links.get(group)
+                guard_took_it = current is None and removed_verdicts.get(pair, ("",))[0] == "disagree"
+                if group in rejected_groups or (current and current[0] != step) or not (current or guard_took_it):
+                    continue
+                if verdicts[new_pair][0] == "disagree":
+                    links.pop(group, None)
+                else:
+                    links[group] = (step, new_id)
+            for pair in [pair for pair in verdicts if pair.fbref_id == old_id and pair.league == league and pair.season == year - 1]:
+                del verdicts[pair]
+
+    collisions_now = id_collisions(links)
+    for key, ids in collisions_now.items():
+        must(key in merged, f"two Understat ids {ids} on FBref id {key[2]} in {key[0]} {key[1]}: only a merge_ids row may do that")
+    for key in merged:
+        must(key in collisions_now, f"merge_ids on {key} puts no second Understat id on that FBref id")
+
+    partial = partial_joins(rows_of, links)
+    for player_season in approved_partial:
+        partial.pop(player_season, None)
+    new_counts = join_counts(rows_of, links)
+    for player_season in kept_partial:
+        partial[player_season] = new_counts[player_season]
+    candidates_after = candidates_of(positions) if combine else candidates
+    # Worked out on the links as they now stand, so a second id from a decision holds a candidate as one from rule 3 does.
+    flags = review_flags(candidates_after, links, partial, two_id_player_seasons(links, rosters, []))
+    for season_key in approved_seasons:
+        must("no joined shots" not in flags.get(season_key, ()), f"approve on {player_season_key(season_key)}: it has no joined shots, so its shot metrics would read as zero. Its shots need a partial_join row with link_to")
+        flags.pop(season_key, None)
+    for season_key in rejected_seasons:
+        flags.setdefault(season_key, set()).add("rejected")
+
+    cross_season_cases = []
+    if merges_on:
+        fbref_ids_of = defaultdict(set)
+        for group, link in links.items():
+            fbref_ids_of[group.understat_id].add(link[1])
+        for key in sorted(allowed_ids):
+            if len(fbref_ids_of[int(key)]) < 2:
+                stop(f"stale decision: cross_season_ids {key} does not reach 2+ FBref ids")
+        for understat_id, ids in sorted(fbref_ids_of.items()):
+            if len(ids) > 1:
+                if str(understat_id) not in allowed_ids:
+                    stop(f"Understat id {understat_id} reaches FBref ids {sorted(ids)}: the run needs a cross_season_ids row with that id, or a different decision")
+                cross_season_cases.append((understat_id, tuple(sorted(ids))))
+
+    pool = pool_of(candidates_after, flags)
+    finished = rule3._replace(final=links, guard=guard, pair_of=pair_of, name_map_rows=+name_map_rows, matches_of=+matches_of, anchor_guard=anchor_guard, anchor_pair_of=anchor_pair_of, anchor_rows=+anchor_rows, anchor_matches=+anchor_matches)
+    joined_before, joined_after = (sum(rows_of[group] for group in stage) for stage in (rule3.final, links))
+    return JoinResult(
+        finished, positions, candidates_after, flags, pool, partial, len(pool_of(candidates, flags_before)), len(pool), joined_before, joined_after,
+        {key: ids for key, ids in rule3.collisions.items() if key not in merged and key not in touched}, merge_rows, merged_collisions, anchors_removed, cross_season_cases,
+        [(league, year, new_id) for (league, year, _), new_id in sorted(combine.items()) if (league, year, new_id) not in set(candidates_after)], list(refused), unjoined_listed,
+    )

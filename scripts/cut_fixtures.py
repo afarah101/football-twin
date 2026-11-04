@@ -110,13 +110,14 @@ RULE3_PLAYER_SEASONS = (
     ("GER", 2023, 3738), ("ENG", 2020, 5613), ("ENG", 2021, 10092), ("ESP", 2023, 5159), ("ENG", 2020, 8756),  # Guirassy, Gabriel, Fosu-Henry, Marc Cardona, Dara O'Shea
     ("ITA", 2021, 9882), ("FRA", 2022, 7947), ("FRA", 2022, 11399), ("ITA", 2019, 7941), ("ITA", 2019, 8259),  # Johnsen, Malinovskiy, Jeffinho, André and Djavan Anderson
     ("ESP", 2023, 10095), ("FRA", 2018, 3738), ("ENG", 2022, 1245),  # Ezzalzouli, Guirassy under the FBref name, Emerson at West Ham
+    ("ITA", 2023, 7944), ("ENG", 2022, 8845), ("ENG", 2023, 8845),  # Strefezza's two ids, Hwang's other seasons
 )
 # Taken by club names, not through the link under test, as (league, year, home, away).
 RULE3_FBREF_PAIRS = (("ITA", 2024, "Atalanta", "Fiorentina"),)
 # Every row of these ids, so their minutes and Pool test are whole: the 3 merges, Juanfran at 2 teams, and the guard and flag cases.
 RULE3_FBREF_IDS = (
     "ac4a4508", "674cfc5a", "8eb68164", "cb9ef70f", "1d039497", "f365b837", "cfd8d664", "9ba48d64",
-    "66784dee", "48d5bd33", "45cce300", "ca241ad3", "bed68338", "923f4dda", "e0bc6fdc", "67ac5bb8", "b92b456a", "169fd162",
+    "66784dee", "48d5bd33", "45cce300", "ca241ad3", "bed68338", "923f4dda", "e0bc6fdc", "67ac5bb8", "b92b456a", "169fd162", "8cfc2f69",
 )
 
 NOT_FOUND = [
@@ -266,6 +267,8 @@ def cut_rule3(out):
     wanted = [("ENG" if league == "EPL" else league, int(season[:4]), html.unescape(name)) in names for league, season, name in zip(rows["league"], rows["season"], rows["player_name"])]
     write(rows[wanted], "understat_xg_data.parquet", "Season totals rows under any name in the sample's league-seasons")
     (out / "rule3__club_map.csv").write_bytes(source.path("club_map.csv").read_bytes())
+    (out / "rule3__review_decisions.csv").write_bytes(source.path("review_decisions.csv").read_bytes())
+    lines.append("| `rule3__review_decisions.csv` | `data/standin/review_decisions.csv` | all | Ahmed's file as it stands |")
     lines.append("| `rule3__club_map.csv` | `data/standin/club_map.csv` | all | The whole map |")
     table = "\n".join(lines)
     (out / "rule3__README.md").write_text(f"""# rule3__ samples
