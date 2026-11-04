@@ -6,7 +6,7 @@ Run date: 2026-11-03. Issue: #7. Repo position at the first trim: `39b1c3a`, lev
 
 | Criterion of #7 (word for word) | Result |
 |---|---|
-| The vetted worldfootballR, FBref and HF files are stored privately as Parquet, with only the columns the build needs | **Met**: 17 Parquet files in `data/standin/`, private repo, plus `club_map.csv` |
+| The vetted worldfootballR, FBref and HF files are stored privately as Parquet, with only the columns the build needs | **Met**: 17 Parquet files in `data/standin/`, private repo, plus `club_map.csv`. One of them, `master_player_stats`, has no planned use, see Findings |
 | The kept columns are listed for each file | **Met**: section 2 and `MANIFEST.md` |
 | The hash of each original file is recorded | **Met**: all 38 in `MANIFEST.md` |
 | The trim script is committed, and running it again on the originals gives the same rows and columns | **Met**: all 19 output files byte-identical across two runs. "Committed" is met by this commit. |
@@ -19,7 +19,7 @@ Run date: 2026-11-03. Issue: #7. Repo position at the first trim: `39b1c3a`, lev
 
 | Severity | Finding | Section |
 |---|---|---|
-| Warning for #6 | Rule 2 must use the decided link, not an exact date. An exact-date link leaves 19 Pool matches unmatched. The decided link leaves 3 (73 shot rows), which are really missing from FBref. The other 16 (384 shot rows) link with gaps of 1, 2 or 11 days. | 10 |
+| Warning for #6 | Rule 2 must use the decided link, not an exact date. An exact-date link leaves 19 Pool matches unmatched. The decided link leaves 3 (73 shot rows), which have no rows in the FBref player stat files. FBref's event files do hold 2 of them (Bochum v Borussia M.Gladbach 6 rows, Verona v Roma 10 rows), so those 2 are in FBref but have no minutes. The other 16 (384 shot rows) link with gaps of 1, 2 or 11 days. | 10 |
 | Warning, **needs Ahmed to review** | Club map: 43 mappings are not exact name matches, and 14 clubs are unmapped. All 14 are Understat-only clubs, and none has a Pool-season match. Both lists are in section 9. Two to look at: `Real Oviedo` to `Oviedo` rests on 4 matches, and `Parma` and `Parma Calcio 1913` both reach `Parma`. | 9 |
 | Warning | Combining per player would have been wrong. One player can have different hrefs in different files for one match, which gives 201 cases of one name counted twice in a team's match, and team-match minutes up to 1170. Each match therefore comes whole from one file, and the maximum is 990. | 4 |
 | Warning | Majority `Pos` matches players by the 8-character id only, as asked. A player with different ids in different files gets fewer votes, which `Pos_Files_Voted` shows. | 4 |
@@ -46,6 +46,44 @@ Run date: 2026-11-03. Issue: #7. Repo position at the first trim: `39b1c3a`, lev
 
 **Open for Ahmed:** the club map review in section 9.
 
+## Known limits, from the audit of `6666192`
+
+Logged, not fixed. The numbers here come from that audit, not from output in this report. Its findings F1, F3 and F5 became plan rules, and F6, F7 and F12 were wording fixes in this report. Plan terms from those rules are not in `GLOSSARY.md` yet, and `name_map.csv` will sit outside the generated `MANIFEST.md`. #6 settles both.
+
+| Finding | Limit |
+|---|---|
+| F1, wording | The finding above says 101 Pool matches have no event rows. That count includes the tie-breaker, so it is 100 once rule 1 removes it. |
+| F2 | 305 of 91,589 Pool substitute events do not match a `Player` exactly in that match and team, for example `Kike`, `Randy Ntekja` and `Martinelli`. One event, `Chris Smalling`, has no " for ". Event rows hold no ids. A rough name repair flipped 0 Pool memberships. |
+| F4 | The shot `league` column has two spellings in 3 files: `La_liga` and `La liga`, `Ligue_1` and `Ligue 1`, `Serie_A` and `Serie A`. Take the league from the file name, as T3 does. |
+| F8 | The opening line says the check scripts are in the appendix, but `link_and_check.py` from Step 0 is not. The audit reproduced its result separately: 38 of 38 hashes agree. |
+| F9 | The audit did not re-run the `pyreadr` check, the mutation test or the fresh-venv run, and has no record to check the code review log against. Ahmed's two re-date checks are not from the data files. An outside source confirms Caen v Toulouse. For Udinese v Roma, only the shot minutes are consistent with it. |
+| F10 | "Ready for #6: YES" stands while the club map review is open. The audit found no wrong mapping among the 43. |
+| F11 | The plan's "Each ordered pair plays once per season" holds only after the tie-breaker filter. Spezia v Hellas Verona appears twice in 2022/23. The nearest date still picks the right match. |
+
+## Joining shots to players, measured for #6
+
+Measured on the current `data/standin/`, with the plan's rule, on the 317,385 Pool shot rows in linked matches. Measured before any FBref id merges, which the plan runs before the guard. These numbers come from an audit script that is not committed, so #6 re-measures them. `name_map.csv` does not exist yet, because #6 writes it.
+
+| Step | Rows joined | Rate |
+|---|---:|---:|
+| Exact | 262,843 | 82.82% |
+| After step 1 | 295,072 | 92.97% |
+| After step 2 | 314,837 | 99.20% |
+| After the minutes guard | 314,806 | 99.19% |
+| After leaving id collisions unjoined | 314,630 | 99.13% |
+
+- **By league, exact / step 1 / step 2 / final:** ENG 90.47 / 97.19 / 99.62 / 99.62; ESP 80.38 / 87.17 / 98.35 / 98.05; FRA 75.65 / 88.83 / 99.41 / 99.41; GER 87.62 / 95.81 / 99.60 / 99.60; ITA 80.01 / 95.43 / 99.05 / 99.02.
+- **Name map size:** 1,118 player-seasons and 19,765 rows reach the guard. 1,116 player-seasons and 19,734 rows keep their link.
+- **Minutes guard:** Understat season minutes (HF) against FBref minutes of the mapped id, limit the larger of 90 minutes or 10%. 1,109 agree, 2 disagree and 7 have no HF row.
+  - **The 2 not linked:** André Anderson to Djavan Anderson, ITA 2019/20 (49 v 167, 1 row), a false link; and Abdessamad Ezzalzouli to Abde Ezzalzouli, ESP 2023/24 (839 v 933, 30 rows).
+  - **Near-miss, for Ahmed's review:** Ezzalzouli's gap of 94 is just over the limit of 93.3. It looks like the right player: FBref spells the name both ways that season, and the other 8 shot rows join the same FBref id by exact name. Until reviewed, the season shot totals are 30 rows short.
+  - **No HF row:** the 7 are all Sehrou Guirassy, whom HF spells Serhou, on 298 rows. The links stay, flagged `minutes_check = none`.
+  - **What the guard cannot catch:** tried against every other same-club player, 3,104 of 32,474 wrong pairs (9.6%) still pass the limit. It is a filter, not proof, so the `name_map.csv` review still matters.
+- **Club check:** scored against `h_a` and `home_away` in the originals, 6 joined rows sit on the wrong club after step 2 and after the guard, and 0 after the id collision rule.
+- **Id collisions, 3, 176 rows left unjoined:** Luis Suárez ESP 2021/22, Raúl García ESP 2023/24 and Danilo ITA 2019/20. With the `h_a` values in the originals none of the 3 occurs, and 314,843 rows join, but using them needs a re-trim. Both Luis Suárez PlayerSeasons in 2021/22 lose all their shots.
+- **Still unjoined:** 2,755 rows. Pool candidates with shots: 3,106 of 3,136 (99.04%). The largest are Ruslan Malinovskiy (261 rows in ITA), Isi Palazón (224), Juan Camilo Hernández (153), Luis Suárez (140) and Simy (128).
+- **Named cases:** Raúl García 5114 to `1a317a1b`; Bruno 2302 to Bruno Soriano `09332647`; Ousmane Camara 11016 to `7d3dfdfd` and 11249 to `5a6b06cd`.
+
 ## Step 0
 
 ```
@@ -62,7 +100,7 @@ b81c51f docs: make the stand-in site private and re-validate on live data
 aeb7168 docs: record box constants and keep FBref data private
 ```
 
-Re-trim start: `8c93206`, 2 commits ahead of origin, with nothing pushed.
+Re-trim start: `8c93206`, then 2 commits ahead of origin. `6666192` is 5 ahead and the commit adding the rule 3 measurements is 6 ahead, with nothing pushed.
 
 Read first: `gh issue view 7`, `gh issue view 6`, `docs/phase-1-plan.md`, `docs/reports/T3_step0_facts.md`, `scripts/cut_fixtures.py`.
 
@@ -135,7 +173,7 @@ Not stored: `ENG_M_1st_keeper_player_advanced_match_stats.rds`. It has no `Pos` 
 | HF `understat_xg_data.csv` | `player_name`, `team`, `league`, `season` | Identity, display | `apps`, `xG`, `xGChain`, `xG90`, `xA90`, `npxG90` |
 | | `minutes`, `shots`, `key_passes`, `xA`, `npxG`, `xGBuildup` | Planned fields, T3 section 3 | |
 | | `goals`, `assists` | Display only | |
-| HF `master_player_stats.csv` | `player`, `player_id`, `league`, `season`, `squad`, `pos`, `min` | The id join in T3 section 4 | The other columns |
+| HF `master_player_stats.csv` | `player`, `player_id`, `league`, `season`, `squad`, `pos`, `min` | No planned field reads it. The criterion names the HF files, T3 counts it, and T3 section 4 measured an id join on it | The other columns |
 
 Names are stored exactly as in the source, with no entity decoding: 2308 shot rows still hold `&#039;`. The literal text `None` in `lastAction` stays text, on 59088 rows, the count T3 gives.
 
