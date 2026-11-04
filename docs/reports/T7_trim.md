@@ -44,11 +44,11 @@ Run date: 2026-11-03. Issue: #7. Repo position at the first trim: `39b1c3a`, lev
 4. Majority `Pos`. The trim applies it, because `data/standin/` holds one `Pos` per row and #6 would have nothing to count. Each row records `Pos_Files_Voted` and `Pos_Tie`.
 5. #6 re-cuts `tests/fixtures/standin/` from `data/standin/`. Those fixtures still hold the original schema.
 
-**Open for Ahmed:** the 50 pairs in `docs/reports/name_map_sample.csv`, and the `partial_join` player-seasons under "Joining shots to players".
+**Open for Ahmed:** the 50 pairs in `docs/reports/name_map_sample.csv`, and the `partial_join` player-seasons under "Joining shots to players". Decisions go in `data/standin/review_decisions.csv`, which the plan's rule 3 defines. Row 1 is the Ezzalzouli approval. `scripts/measure_rule3.py` does not read the file, so its numbers are before any decisions, except that it holds the same approval as a constant.
 
 ## Known limits, from the audit of `6666192`
 
-Logged, not fixed. The numbers here come from that audit, not from output in this report. Its findings F1, F3 and F5 became plan rules, and F6, F7 and F12 were wording fixes in this report. Plan terms from those rules are not in `GLOSSARY.md` yet, and `name_map.csv` will sit outside the generated `MANIFEST.md`. #6 settles both.
+Logged, not fixed. The numbers here come from that audit, not from output in this report. Its findings F1, F3 and F5 became plan rules, and F6, F7 and F12 were wording fixes in this report. Plan terms from those rules are not in `GLOSSARY.md` yet, and `name_map.csv` and `review_decisions.csv` sit outside the generated `MANIFEST.md`. #6 settles both.
 
 | Finding | Limit |
 |---|---|
