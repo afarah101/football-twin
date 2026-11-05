@@ -1783,13 +1783,13 @@ class StageDReviewDecisions(unittest.TestCase):
         self.assertEqual(result.partial, {})
 
     def test_d_synthetic_approve_and_reject_on_an_id_from_a_decision_stop(self):
-        # synthetic: 0 real rows. spec:115, one case one answer, on ids the player-season reaches only through a decision or a combine. The merges-off run passes (D21).
+        # synthetic: 0 real rows. spec:115, one case one answer, on ids the player-season reaches only through a decision or a combine. The merges-off run stops on the final check, because the `approve` joins rows the `reject` left unjoined (D46).
         _, _, rows_of, rosters, _, y_key = stopped_case()
         y = ("ESP", 2022, "y")
         rows = [decision("name_map", y_key, "approve"), decision("player_season", "ESP|2021|y", "approve"), decision("partial_join", "ESP|2021|1", "reject")]
         facts = hand_facts({"x": 900, "y": 900, "z": 900})
         self.assert_stops("player_season ESP|2021|y", "partial_join ESP|2021|1", "disagree", rows_of=rows_of, rosters=rosters, decisions=rows, candidates=[y], facts=facts)
-        self.assertIn(("ESP", 2021, 1), hand_run(rows_of, rosters, rows, [y], facts=facts, merges_on=False).partial)
+        self.assert_stops("final check", "partial_join ESP|2021|1", rows_of=rows_of, rosters=rosters, decisions=rows, candidates=[y], facts=facts, merges_on=False)
 
         x = ("ESP", 2022, "x")
         rows_of = {hand_group("m1"): 3, hand_group("m2", name="Zed"): 1}
@@ -1889,6 +1889,24 @@ class StageDReviewDecisions(unittest.TestCase):
                 # Each row alone passes, and the combine alone joins the rows.
                 self.assertNotIn(map_link, hand_run(decisions=[reject], **run).rule3.final)
                 self.assertEqual(hand_run(decisions=[combine], **run).rule3.final[map_link][1], "x")
+
+    def test_d_synthetic_final_check_stops_on_a_row_a_reject_left_unjoined(self):
+        # synthetic: 0 real rows. D46: without the stop these rows join at (100, 100) and the case is still listed as left unjoined. Both runs stop, as for D47.
+        map_link = hand_group("m3")
+        rows_of = {hand_group("m1"): 50, hand_group("m2"): 49, map_link: 1}
+        rosters = {("m1", "A"): hand_roster(("c", "Kike")), ("m2", "A"): hand_roster(("c", "Kike")), ("m3", "A"): hand_roster(("c", "Kike Garcia"), ("z", "Zed")), ("m4", "B"): hand_roster(("x", "Xav"))}
+        run = {"rows_of": rows_of, "rosters": rosters, "candidates": [("ESP", 2022, "c"), ("ESP", 2022, "z")], "facts": hand_facts({"c": 100, "x": 800, "z": 900})}
+        reject = decision("partial_join", "ESP|2021|1", "reject")
+        for label, rows, route in (
+            ("approve", [decision("name_map", "ESP|2021|1|Kike|c", "approve")], "approve on name_map ESP|2021|1|Kike|c"),
+            ("link_to", [decision("name_map", "ESP|2021|1|Kike|c", "link_to", "z"), decision("cross_season_ids", "1", "approve")], "link_to on name_map ESP|2021|1|Kike|c"),
+        ):
+            for merges_on in (True, False):
+                with self.subTest(label, merges_on=merges_on):
+                    self.assert_stops("Kike (ESP|2021|1) in match m3", route, "reject on partial_join ESP|2021|1", decisions=[*rows, reject], merges_on=merges_on, **run)
+                    # The link row alone joins the rows, and the `reject` alone leaves them out.
+                    self.assertEqual(join.join_counts(rows_of, hand_run(decisions=rows, merges_on=merges_on, **run).rule3.final)[("ESP", 2021, 1)], (100, 100))
+                    self.assertEqual(join.join_counts(rows_of, hand_run(decisions=[reject], merges_on=merges_on, **run).rule3.final)[("ESP", 2021, 1)], (99, 100))
 
     def test_d_synthetic_merges_off_run_stops_on_two_understat_ids_on_one_id(self):
         # synthetic: 0 real rows. D47: the `approve` puts Understat 1 on b beside Understat 2's exact link. Before this stop the merges-off run counted both as joined, with no error.

@@ -913,12 +913,14 @@ def finish_join(rule3, rows_of, rosters, positions, decisions, refused, candidat
             for pair in [pair for pair in verdicts if pair.fbref_id == old_id and pair.league == league and pair.season == year - 1]:
                 del verdicts[pair]
 
+    def combines_onto(group):
+        return [f"link_to on player_season {player_season_key(key)} to {new_id}" for key, new_id in sorted(combine.items()) if new_id == links[group][1] and key[:2] == (group.league, group.season + 1)]
+
     # A combine must not join rows a `reject` left unjoined (D46). The merges-off run does not stop (D21), so the rows stay out there.
     left_unjoined = {partial_keys[row["key"]] for row in rows if row["item_type"] == "partial_join" and row["decision"] == "reject"}
     for group in sorted(links.keys() - linked_before_combines):
         if group.player_season in left_unjoined:
-            combines = [f"link_to on player_season {player_season_key(key)} to {new_id}" for key, new_id in sorted(combine.items()) if new_id == links[group][1] and key[:2] == (group.league, group.season + 1)]
-            must(False, f"{' and '.join(combines)} would join {group.name} ({partial_join_key(group.player_season)}) in match {group.match}, which reject on partial_join {partial_join_key(group.player_season)} left unjoined. Keep one.")
+            must(False, f"{' and '.join(combines_onto(group))} would join {group.name} ({partial_join_key(group.player_season)}) in match {group.match}, which reject on partial_join {partial_join_key(group.player_season)} left unjoined. Keep one.")
             del links[group]
 
     collisions_now = id_collisions(links)
@@ -973,6 +975,19 @@ def finish_join(rule3, rows_of, rosters, positions, decisions, refused, candidat
                 if str(understat_id) not in allowed_ids:
                     stop(f"Understat id {understat_id} reaches FBref ids {sorted(ids)}: the run needs a cross_season_ids row with that id, or a different decision")
                 cross_season_cases.append((understat_id, tuple(sorted(ids))))
+
+    # Final check (D46): whatever route joined it, no row in `final` may be one a `reject` row left unjoined. Both runs stop, because it is a wrong join in either (D47).
+    rejected_by = {}
+    for row in rows:
+        if row["decision"] == "reject" and row["item_type"] in LINK_ITEM_TYPES:
+            rejected_by.update(dict.fromkeys(items[(row["item_type"], row["key"])], row))
+        elif row["decision"] == "reject" and row["item_type"] == "partial_join":
+            rejected_by.update(dict.fromkeys((group for group in rows_of if group.player_season == partial_keys[row["key"]] and group not in rule3.final), row))
+    for group in sorted(rejected_by.keys() & links.keys()):
+        link_rows = [row for row in rows if row["item_type"] in LINK_ITEM_TYPES and row["decision"] != "reject" and (group in items[(row["item_type"], row["key"])] or (row["decision"] == "merge_ids" and row["fbref_id"] == links[group][1] and row["key"].split("|")[:2] == [group.league, str(group.season)]))]
+        routes = [f"{row['decision']} on {row['item_type']} {row['key']}" for row in link_rows] + combines_onto(group) or [f"a {links[group][0]} link"]
+        rejected = rejected_by[group]
+        stop(f"final check: {group.name} ({partial_join_key(group.player_season)}) in match {group.match} is joined on {links[group][1]} by {' and '.join(routes)}, but reject on {rejected['item_type']} {rejected['key']} left it unjoined. Keep one.")
 
     pool = pool_of(candidates_after, flags)
     finished = rule3._replace(final=links, guard=guard, pair_of=pair_of, name_map_rows=+name_map_rows, matches_of=+matches_of, anchor_guard=anchor_guard, anchor_pair_of=anchor_pair_of, anchor_rows=+anchor_rows, anchor_matches=+anchor_matches)
