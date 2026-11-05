@@ -112,7 +112,7 @@ These rules settle how the existing rows work. They add no row type and no colum
 
 Refused merges with shared matches stop on `link_to`, because of the shared-match rule, so `reject` is their only route.
 
-**One case, one answer.** Rows on different keys for one case must agree, or the run stops and names both keys: `approve` on a `player_season` key with `reject` on its `partial_join` key, `link_to` A to B with `link_to` B to A, `reject` on one id of a refused merge with `link_to` on the other, `approve` with `link_to` or `merge_ids` on two keys that name one shot group, or two `link_to` or `merge_ids` rows with different ids on two keys that name one shot group (D44). One row alone is enough.
+**One case, one answer.** Rows on different keys for one case must agree, or the run stops and names both keys: `approve` on a `player_season` key with `reject` on its `partial_join` key, `link_to` A to B with `link_to` B to A, `reject` on one id of a refused merge with `link_to` on the other, `approve` or `reject` with `link_to` or `merge_ids` on two keys that name one shot group, or two `link_to` or `merge_ids` rows with different ids on two keys that name one shot group (D44). One row alone is enough.
 
 **`name_map`:** a key also exists for any link in an id collision, whichever step made it, so an exact or step 1 link can carry `merge_ids` (D38).
 
@@ -233,7 +233,7 @@ Prior art: `tests/test_measure_rule3.py` tests the real Chema, Hwang and Baba ca
 
 ### Rule 3 clause table
 
-Stage A also holds the rule 1, 2 and id merge clauses, because Ahmed placed them in ticket 1. MEASURED counts come from the design check or the cited line. 179 clauses: 70 real, 109 `synthetic`. A hand-made decision row on real data rows counts as `synthetic`, because only 1 real decision row exists.
+Stage A also holds the rule 1, 2 and id merge clauses, because Ahmed placed them in ticket 1. MEASURED counts come from the design check or the cited line. 184 clauses: 70 real, 114 `synthetic`. A hand-made decision row on real data rows counts as `synthetic`, because only 1 real decision row exists.
 
 | Clause | Plan line | Ticket 1 stage | Test name | Real or `synthetic` |
 |---|---|---|---|---|
@@ -413,6 +413,11 @@ Stage A also holds the rule 1, 2 and id merge clauses, because Ahmed placed them
 | A held two-id candidate has a `player_season` key | D31 | D | `test_d_synthetic_held_two_id_candidate_has_a_review_key` | synthetic: 0 real rows |
 | `approve` with `link_to` or `merge_ids` on two keys that name one shot group stops, naming both | D44 | D | `test_d_synthetic_approve_and_link_to_on_one_collided_anchor_stop` | synthetic: 0 real rows |
 | Two `link_to` or `merge_ids` rows with different ids on two keys that name one shot group stop, naming both. The same id passes | D44 | D | `test_d_synthetic_two_link_to_on_one_collided_anchor_stop` | synthetic: 0 real rows |
+| `reject` with `link_to` or `merge_ids` on two keys that name one shot group stops, naming both | D44 | D | `test_d_synthetic_reject_with_a_moving_row_on_one_collided_anchor_stops` | synthetic: 0 real rows |
+| `approve` on a link survives two `link_to` combines, whatever the verdict between them | D31 | D | `test_d_synthetic_approve_survives_two_combines` | synthetic: 0 real rows |
+| `approve` clears `partial_join` on an id that a decision added | D36 | D | `test_d_synthetic_approve_on_an_id_from_a_decision_clears_partial_join` | synthetic: 0 real rows |
+| `approve` clears `partial_join` on an id the player-season reaches only through a combine | D36 | D | `test_d_synthetic_approve_on_a_combined_id_clears_partial_join` | synthetic: 0 real rows |
+| `approve` on a `player_season` key with `reject` on its `partial_join` key stops when the id comes from a decision or a combine, on the merges-on run | D36 | D | `test_d_synthetic_approve_and_reject_on_an_id_from_a_decision_stop` | synthetic: 0 real rows |
 | `Keep their link` leaves out a rejected link | 142 | D | `test_d_synthetic_keep_their_link_count_leaves_out_a_rejected_link` | synthetic: 0 real rows |
 | The merges-off run passes over a row good only on merged ids, and the merges-on run stops on it | D21 | D | `test_d_synthetic_merges_off_run_passes_over_rows_good_only_on_merged_ids` | synthetic: 0 real rows |
 
@@ -884,4 +889,4 @@ Decisions Claude made alone, under Ahmed's standing rules.
 | D41 | `sub_status` and `min_missing` are listed and need no row, because they hold nothing. An automatic merge has no undo row: decisions apply after rule 3 (plan:142) and merges run before it, so an undo would change that order for no known wrong merge. If one is wrong, Ahmed changes the rule | 1, 5 | MEASURED: 3 merges, all listed (design check). Plan:126 and plan:127 set the flags as report-only | 3 merges |
 | D42 | The number check compares the output with the pinned numbers using `diff`, so a rise fails. `scripts/measure_rule3.py:603` alone only checks `>=`, and it stays as it is | 6 | MEASURED: the script's line reads `count(final) >= MIN_JOINED_ROWS` | 0 |
 | D43 | By Ahmed: a public file is site or release output: anything the Build writes for the site or a release, or deploys to a host. Generated review files, reports and fixtures in this private repo are not public files, and neither are results sent to the outside reviewer. Stand-in runs write the same site format into `build/private/`. No Vercel project is linked until the gate opens, and the Monday job deploys only through the publishing step | 1, 2, 5, 7 | `NOT RUN`: `test_standin_run_writes_only_under_build_private` (#8) and `test_monday_job_deploys_only_through_the_publishing_step` (#15) prove it | 1 source |
-| D44 | By Ahmed: rows on different keys that name one shot group must agree. `approve` with `link_to` or `merge_ids` stops, and so do two `link_to` or `merge_ids` rows with different ids. Two such rows with the same id pass. **New stops, which Ahmed asked for although the exit rule adds none for a Minor. Why no existing route works:** the player would split across two ids, or the last row would win with no error. The way back is removing one row. `approve` with `merge_ids` to the same id also stops, and that case is open on #17 | 2, 3, 5, 7 | MEASURED: 0 real collisions after the guard (design check), and 0 such decision rows | 0 |
+| D44 | By Ahmed: rows on different keys that name one shot group must agree. `approve` or `reject` with `link_to` or `merge_ids` stops, and so do two `link_to` or `merge_ids` rows with different ids. Two such rows with the same id pass. `approve` with `reject` passes, and the link stays out, as `test_d_synthetic_approve_on_anchor_key_does_not_restore_a_rejected_link` holds. **New stops, which Ahmed asked for although the exit rule adds none for a Minor. Why no existing route works:** the player would split across two ids, a `reject` would cancel the moving row, or the last row would win, each with no error. The way back is removing one row. `approve` with `merge_ids` to the same id also stops, and that case is open on #17 | 2, 3, 5, 7 | MEASURED: 0 real collisions after the guard (design check), and 0 such decision rows | 0 |

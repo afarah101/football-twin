@@ -1740,6 +1740,63 @@ class StageDReviewDecisions(unittest.TestCase):
         same = [decision("name_map", key, "link_to", "z"), decision("season_anchor", key, "link_to", "z"), other_id]
         self.assertEqual(hand_run(rows_of, rosters, same, facts=facts).rule3.final[hand_group("m3")], ("reviewed", "z"))
 
+    def test_d_synthetic_approve_survives_two_combines(self):
+        # synthetic: 0 real rows. The same approve row and the same final verdict must give the same result, whatever the verdict between the two combines.
+        group = hand_group("m1")
+        rosters = {("m1", "A"): hand_roster(("c", "Kike Garcia")), ("m3", "A"): hand_roster(("x", "Carlos")), ("m5", "A"): hand_roster(("d", "Dan"))}
+        refused = [join.RefusedMerge("ESP", 2022, "Kike", ("c", "x"), "both ids in other seasons"), join.RefusedMerge("ESP", 2022, "Dan", ("d", "y9"), "both ids in other seasons")]
+        rows = [decision("name_map", "ESP|2021|1|Kike|c", "approve"), decision("player_season", "ESP|2021|c", "link_to", "x"), decision("player_season", "ESP|2021|d", "link_to", "x")]
+        disagrees_all_along = hand_run({group: 5}, rosters, rows, refused=refused, facts=hand_facts({"c": 900, "x": 500, "d": 100}))
+        agrees_after_the_first = hand_run({group: 5}, rosters, rows, refused=refused, facts=hand_facts({"c": 900, "x": 50, "d": 500}))
+        self.assertEqual(disagrees_all_along.rule3.final, {group: ("map", "x")})
+        self.assertEqual(agrees_after_the_first.rule3.final, {group: ("map", "x")})
+
+    def test_d_synthetic_reject_with_a_moving_row_on_one_collided_anchor_stops(self):
+        # synthetic: 0 real collisions. spec:115, one case one answer: the `reject` row would cancel the moving row on the shared group, with no error.
+        rows_of = {hand_group("m1"): 5, hand_group("m2"): 5, hand_group("m3"): 5, hand_group("m4", 2): 5}
+        both = (("z", "Enrique"),)
+        rosters = {("m1", "A"): hand_roster(("x", "Kike"), *both), ("m2", "A"): hand_roster(("x", "Kike"), *both), ("m3", "A"): hand_roster(("x", "Kike Garcia"), ("w", "Kike Lopez"), *both), ("m4", "A"): hand_roster(("x", "Kike"), *both)}
+        key, second_id = "ESP|2021|1|Kike|x", "ESP|2021|2|Kike|x"
+        for verdict, other_id in (("link_to", decision("name_map", second_id, "reject")), ("merge_ids", decision("name_map", second_id, "link_to", "z"))):
+            for rejected_on, moved_on in (("name_map", "season_anchor"), ("season_anchor", "name_map")):
+                with self.subTest(verdict=verdict, rejected_on=rejected_on):
+                    rows = [decision(rejected_on, key, "reject"), decision(moved_on, key, verdict, "z"), other_id, decision("cross_season_ids", "1", "approve")]
+                    self.assert_stops("reject", verdict, rejected_on, moved_on, key, "one shot group", rows_of=rows_of, rosters=rosters, decisions=rows, facts=hand_facts({"x": 900, "z": 900}))
+
+    def test_d_synthetic_approve_on_an_id_from_a_decision_clears_partial_join(self):
+        # synthetic: 0 real rows. D36: `approve` clears `partial_join` on an id that a decision added, as it does on an id from rule 3.
+        _, _, rows_of, rosters, _, y_key = stopped_case()
+        y = ("ESP", 2022, "y")
+        rows = [decision("name_map", y_key, "approve"), decision("player_season", "ESP|2021|y", "approve")]
+        result = hand_run(rows_of, rosters, rows, [y], facts=hand_facts({"x": 900, "y": 900, "z": 900}))
+        self.assertIn(y, result.pool)
+        self.assertEqual(result.partial, {})
+
+    def test_d_synthetic_approve_on_a_combined_id_clears_partial_join(self):
+        # synthetic: 0 real rows. D36: the player-season reaches y only through the combine, and `approve` on y clears it.
+        x, y = ("ESP", 2022, "x"), ("ESP", 2022, "y")
+        rows_of = {hand_group("m1"): 3, hand_group("m2", name="Zed"): 1}
+        rosters = {("m1", "A"): hand_roster(("x", "Kike")), ("m2", "A"): hand_roster(("w", "Other")), ("m3", "A"): hand_roster(("y", "Kike"))}
+        rows = [decision("player_season", "ESP|2021|x", "link_to", "y"), decision("player_season", "ESP|2021|y", "approve")]
+        result = hand_run(rows_of, rosters, rows, lambda found: [y] if "x" not in set(found["fbref_id"]) else [x, y], facts=hand_facts({"x": 900, "y": 10, "w": 900}))
+        self.assertEqual(result.rule3.final[hand_group("m1")][1], "y")
+        self.assertEqual(result.partial, {})
+
+    def test_d_synthetic_approve_and_reject_on_an_id_from_a_decision_stop(self):
+        # synthetic: 0 real rows. spec:115, one case one answer, on ids the player-season reaches only through a decision or a combine. The merges-off run passes (D21).
+        _, _, rows_of, rosters, _, y_key = stopped_case()
+        y = ("ESP", 2022, "y")
+        rows = [decision("name_map", y_key, "approve"), decision("player_season", "ESP|2021|y", "approve"), decision("partial_join", "ESP|2021|1", "reject")]
+        facts = hand_facts({"x": 900, "y": 900, "z": 900})
+        self.assert_stops("player_season ESP|2021|y", "partial_join ESP|2021|1", "disagree", rows_of=rows_of, rosters=rosters, decisions=rows, candidates=[y], facts=facts)
+        self.assertIn(("ESP", 2021, 1), hand_run(rows_of, rosters, rows, [y], facts=facts, merges_on=False).partial)
+
+        x = ("ESP", 2022, "x")
+        rows_of = {hand_group("m1"): 3, hand_group("m2", name="Zed"): 1}
+        rosters = {("m1", "A"): hand_roster(("x", "Kike")), ("m2", "A"): hand_roster(("w", "Other")), ("m3", "A"): hand_roster(("y", "Kike"))}
+        rows = [decision("player_season", "ESP|2021|x", "link_to", "y"), decision("player_season", "ESP|2021|y", "approve"), decision("partial_join", "ESP|2021|1", "reject")]
+        self.assert_stops("player_season ESP|2021|y", "partial_join ESP|2021|1", "disagree", rows_of=rows_of, rosters=rosters, decisions=rows, candidates=lambda found: [y] if "x" not in set(found["fbref_id"]) else [x, y], facts=hand_facts({"x": 900, "y": 10, "w": 900}))
+
     def test_d_synthetic_keep_their_link_count_leaves_out_a_rejected_link(self):
         # synthetic: hand-made `reject` on a real name map link, because the real file has no reject row. A rejected link keeps nothing.
         before = sample_finish([]).rule3

@@ -676,14 +676,14 @@ def understat_ids_on(fbref_key, links):
     return {group.player_season for group, link in links.items() if link[1] == fbref_id and group.league == league and group.season == year - 1}
 
 
-def check_cases_agree(rows, first_links, refused):
+def check_cases_agree(rows, links, refused):
     """D36 and D37: rows on different keys for one case must agree. The two-row rule only sees one key."""
     by_key = {(row["item_type"], row["key"]): row for row in rows}
     for row in rows:
         if row["item_type"] != "player_season":
             continue
         league, season, fbref_id = row["key"].split("|")
-        for player_season in understat_ids_on((league, int(season) + 1, fbref_id), first_links):
+        for player_season in understat_ids_on((league, int(season) + 1, fbref_id), links):
             other = by_key.get(("partial_join", partial_join_key(player_season)))
             if other and {row["decision"], other["decision"]} == {"approve", "reject"}:
                 stop(f"{row['decision']} on player_season {row['key']} and {other['decision']} on partial_join {other['key']} disagree. Keep one.")
@@ -749,11 +749,11 @@ def finish_join(rule3, rows_of, rosters, positions, decisions, refused, candidat
         if merges_on and not holds:
             stop(message)
 
-    # One group can sit under two keys, and `approve` on one with `link_to` on the other would split the player, while two `link_to` rows with different ids would let the last one win (spec:115).
-    approved_rows = [row for row in rows if row["item_type"] in LINK_ITEM_TYPES and row["decision"] == "approve"]
+    # One group can sit under two keys. `approve` on one with `link_to` on the other would split the player, `reject` would cancel the `link_to` with no error, and two `link_to` rows with different ids would let the last one win (spec:115).
+    kept_or_rejected_rows = [row for row in rows if row["item_type"] in LINK_ITEM_TYPES and row["decision"] in ("approve", "reject")]
     moved_rows = [row for row in rows if row["item_type"] in LINK_ITEM_TYPES and row["decision"] in ("link_to", "merge_ids")]
     for index, row in enumerate(moved_rows):
-        for other in [*approved_rows, *(later for later in moved_rows[index + 1:] if later["fbref_id"] != row["fbref_id"])]:
+        for other in [*kept_or_rejected_rows, *(later for later in moved_rows[index + 1:] if later["fbref_id"] != row["fbref_id"])]:
             must(items[(row["item_type"], row["key"])].keys().isdisjoint(items[(other["item_type"], other["key"])]), f"{row['decision']} on {row['item_type']} {row['key']} and {other['decision']} on {other['item_type']} {other['key']} name one shot group. Keep one.")
 
     def move_rows(groups, row):
@@ -878,6 +878,9 @@ def finish_join(rule3, rows_of, rosters, positions, decisions, refused, candidat
         for step, pairs, verdicts, removed_verdicts, row_counts, match_counts in (("map", pair_of, guard, rule3.guard, name_map_rows, matches_of), ("season_anchor", anchor_pair_of, anchor_guard, rule3.anchor_guard, anchor_rows, anchor_matches)):
             # Read before any row moves: one approval covers every group of a pair, on either id. From the rows too, because a verdict reads `approved` only if it was `disagree` when the row applied.
             approved_pairs = approved_by_row[step] | {pair for pair, verdict in verdicts.items() if verdict[0] == "approved"}
+            # The approval moves with its pair, so a later combine under new_id still sees it.
+            approved_pairs |= {pair._replace(fbref_id=new_id) for pair in approved_pairs if pair.fbref_id == old_id and pair.league == league and pair.season == year - 1}
+            approved_by_row[step] = approved_pairs
             for group, pair in list(pairs.items()):
                 if pair.fbref_id not in (old_id, new_id) or group.league != league or group.season != year - 1:
                     continue
@@ -889,7 +892,7 @@ def finish_join(rule3, rows_of, rosters, positions, decisions, refused, candidat
                     match_counts[new_pair] += 1
                     match_counts[pair] -= 1
                 verdict = minutes_guard([new_pair], facts)[new_pair]
-                kept_by_ahmed = (pair in approved_pairs or new_pair in approved_pairs) and verdict[0] == "disagree"
+                kept_by_ahmed = new_pair in approved_pairs and verdict[0] == "disagree"
                 verdicts[new_pair] = ("approved", *verdict[1:]) if kept_by_ahmed else verdict
                 current = links.get(group)
                 guard_took_it = current is None and removed_verdicts.get(pair, ("",))[0] == "disagree"
@@ -908,12 +911,16 @@ def finish_join(rule3, rows_of, rosters, positions, decisions, refused, candidat
     for key in merged:
         must(key in collisions_now, f"merge_ids on {key} puts no second Understat id on that FBref id")
 
+    # Again on the final links, because a decision or a combine can reach an id rule 3 did not. Merges-on only, so a row good only on merged ids does not stop the other run (D21).
+    if merges_on:
+        check_cases_agree(rows, links, refused)
+
     # partial_join holds every id its player-season reaches, so it clears only when all of those ids are approved. Each id's own flag clears below.
     joined_ids = defaultdict(set)
     for group, link in links.items():
         joined_ids[group.player_season].add(link[1])
     for league, year, fbref_id in approved_seasons:
-        for player_season in understat_ids_on((league, year, fbref_id), rule3.final):
+        for player_season in understat_ids_on((league, year, fbref_id), links):
             if all((league, year, found) in approved_seasons for found in joined_ids[player_season]):
                 approved_partial.add(player_season)
 
