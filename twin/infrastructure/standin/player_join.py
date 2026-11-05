@@ -868,6 +868,7 @@ def finish_join(rule3, rows_of, rosters, positions, decisions, refused, candidat
         step: {group for group, link in links.items() if link[0] == step} | {group for group, pair in first_pairs.items() if group not in links and group not in rejected_groups and group.player_season not in colliding and first_verdicts[pair][0] == "disagree"}
         for step, first_pairs, first_verdicts in (("map", rule3.pair_of, rule3.guard), ("season_anchor", rule3.anchor_pair_of, rule3.anchor_guard))
     }
+    linked_before_combines = set(links)
     for (league, year, old_id), new_id in sorted(combine.items()):
         if (league, year, new_id) in combine:
             stop(f"link_to on {player_season_key((league, year, old_id))} names {new_id}, and {player_season_key((league, year, new_id))} has its own link_to. Name the id the record ends under.")
@@ -912,9 +913,19 @@ def finish_join(rule3, rows_of, rosters, positions, decisions, refused, candidat
             for pair in [pair for pair in verdicts if pair.fbref_id == old_id and pair.league == league and pair.season == year - 1]:
                 del verdicts[pair]
 
+    # A combine must not join rows a `reject` left unjoined (D46). The merges-off run does not stop (D21), so the rows stay out there.
+    left_unjoined = {partial_keys[row["key"]] for row in rows if row["item_type"] == "partial_join" and row["decision"] == "reject"}
+    for group in sorted(links.keys() - linked_before_combines):
+        if group.player_season in left_unjoined:
+            combines = [f"link_to on player_season {player_season_key(key)} to {new_id}" for key, new_id in sorted(combine.items()) if new_id == links[group][1] and key[:2] == (group.league, group.season + 1)]
+            must(False, f"{' and '.join(combines)} would join {group.name} ({partial_join_key(group.player_season)}) in match {group.match}, which reject on partial_join {partial_join_key(group.player_season)} left unjoined. Keep one.")
+            del links[group]
+
     collisions_now = id_collisions(links)
     for key, ids in collisions_now.items():
-        must(key in merged, f"two Understat ids {ids} on FBref id {key[2]} in {key[0]} {key[1]}: only a merge_ids row may do that")
+        # Both runs stop: two players on one id is a wrong join, even in the before-merge numbers (D47).
+        if key not in merged:
+            stop(f"two Understat ids {ids} on FBref id {key[2]} in {key[0]} {key[1]}: only a merge_ids row may do that")
     for key in merged:
         must(key in collisions_now, f"merge_ids on {key} puts no second Understat id on that FBref id")
 

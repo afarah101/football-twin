@@ -1868,6 +1868,35 @@ class StageDReviewDecisions(unittest.TestCase):
                     self.assertEqual(result.partial, {})
                     self.assertEqual(list(result.pool), [x])
 
+    def test_d_synthetic_combine_that_would_join_rows_a_reject_left_unjoined_stops(self):
+        # synthetic: 0 real rows. D46: the `reject` says the rows stay unjoined and the combine says they join, so the run stops and names both.
+        x = ("ESP", 2022, "x")
+        refused = [join.RefusedMerge("ESP", 2022, "Kike", ("c", "q"), "both ids in other seasons")]
+        reject = decision("partial_join", "ESP|2021|1", "reject")
+        combine = decision("player_season", "ESP|2021|c", "link_to", "x")
+        facts = hand_facts({"c": 100, "x": 800})
+        map_link = hand_group("m3")
+        unflagged = ({hand_group("m1"): 50, hand_group("m2"): 49, map_link: 1}, {("m1", "A"): hand_roster(("c", "Kike")), ("m2", "A"): hand_roster(("c", "Kike")), ("m3", "A"): hand_roster(("c", "Kike Garcia")), ("m4", "B"): hand_roster(("x", "Xav"))})
+        flagged = ({hand_group("m1"): 1, hand_group("m2"): 1, map_link: 98}, {("m1", "A"): hand_roster(("c", "Kike")), ("m2", "A"): hand_roster(("c", "Kike")), ("m3", "A"): hand_roster(("c", "Kike Garcia"), ("w", "Kike Lopez")), ("m4", "B"): hand_roster(("x", "Xav"))})
+        for label, (rows_of, rosters), before in (("unflagged", unflagged, (99, 100)), ("flagged", flagged, (2, 100))):
+            with self.subTest(label):
+                run = {"rows_of": rows_of, "rosters": rosters, "candidates": [x], "refused": refused, "facts": facts}
+                self.assert_stops("ESP|2021|1", "reject on partial_join", "link_to on player_season ESP|2021|c", "match m3", decisions=[reject, combine], **run)
+                # The merges-off run does not stop (D21), and the rows stay out, as the `reject` says.
+                off = hand_run(decisions=[reject, combine], merges_on=False, **run)
+                self.assertNotIn(map_link, off.rule3.final)
+                self.assertEqual(join.join_counts(rows_of, off.rule3.final)[("ESP", 2021, 1)], before)
+                # Each row alone passes, and the combine alone joins the rows.
+                self.assertNotIn(map_link, hand_run(decisions=[reject], **run).rule3.final)
+                self.assertEqual(hand_run(decisions=[combine], **run).rule3.final[map_link][1], "x")
+
+    def test_d_synthetic_merges_off_run_stops_on_two_understat_ids_on_one_id(self):
+        # synthetic: 0 real rows. D47: the `approve` puts Understat 1 on b beside Understat 2's exact link. Before this stop the merges-off run counted both as joined, with no error.
+        rows_of = {hand_group("m0"): 1, hand_group("m1"): 1, hand_group("m2"): 96, hand_group("m6"): 2, hand_group("m4", 2): 1}
+        rosters = {("m0", "A"): hand_roster(("d", "Kike")), ("m1", "A"): hand_roster(("d", "Kike")), ("m2", "A"): hand_roster(("b", "Kike Garcia")), ("m4", "A"): hand_roster(("b", "Kike")), ("m6", "A"): hand_roster(("b", "Zed"))}
+        facts = hand_facts({"b": 150, "d": 0}, season_rows={("ESP", 2021, "Kike"): [join.SeasonRow({"A"}, 150)]}, shot_names={("ESP", 2021, 1): {"Kike"}, ("ESP", 2021, 2): {"Kike"}})
+        self.assert_stops("two Understat ids [1, 2]", "FBref id b", rows_of=rows_of, rosters=rosters, decisions=[decision("name_map", "ESP|2021|1|Kike|b", "approve")], candidates=[("ESP", 2022, "b")], facts=facts, merges_on=False)
+
     def test_d_synthetic_reject_on_an_id_holds_only_player_seasons_it_reaches(self):
         # synthetic: 0 real rows. Both of the player-season's groups move from y to z, so `reject` on y says nothing about z.
         y, z = ("ESP", 2022, "y"), ("ESP", 2022, "z")
