@@ -1808,8 +1808,13 @@ class StageDReviewDecisions(unittest.TestCase):
                 rows = [decision("player_season", "ESP|2021|c", "link_to", "x"), decision("player_season", f"ESP|2021|{second}", "link_to", "x")]
                 others = {("m4", "A"): hand_roster(("x", "Carlos")), ("m5", "A"): hand_roster((second, "Dan"))}
                 facts = hand_facts({"c": 100, "x": 100, second: 700})
-                mapped = hand_run(rows_of, {("m1", "A"): hand_roster(("c", "Kike Garcia")), **others}, rows, refused=refused, facts=facts)
+                x = ("ESP", 2022, "x")
+                mapped = hand_run(rows_of, {("m1", "A"): hand_roster(("c", "Kike Garcia")), **others}, rows, [x], refused=refused, facts=facts)
+                self.assertEqual(mapped.rule3.guard[join.PlayerSeasonName(*group.player_season_name, "x")], ("agree", 900, 900))
                 self.assertEqual(mapped.rule3.final, {group: ("map", "x")})
+                self.assertEqual(mapped.partial, {})
+                self.assertIn(x, mapped.pool)
+                self.assertNotIn(x, mapped.flags)
                 anchor_rosters = {("m1", "A"): hand_roster(("c", "Kike")), ("m2", "A"): hand_roster(("c", "Kike")), ("m3", "A"): hand_roster(("c", "Kike Garcia"), ("w", "Kike Lopez")), **others}
                 self.assertEqual(hand_run(anchor_rows, anchor_rosters, rows, refused=refused, facts=facts).rule3.final[anchored], ("season_anchor", "x"))
 
