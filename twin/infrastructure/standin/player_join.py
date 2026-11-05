@@ -515,6 +515,10 @@ def id_collisions(joined):
     return {key: sorted(found) for key, found in sorted(ids.items()) if len(found) > 1}
 
 
+def colliding_player_seasons(collisions):
+    return {(league, season, understat_id) for (league, season, _), ids in collisions.items() for understat_id in ids}
+
+
 def rule3_links(rows_of, rosters, facts):
     """Exact, step 1, step 2, the guard, step 3, the guard on its links, then id collisions. Plan lines 129 to 136, in that order."""
     groups = sorted(rows_of)
@@ -538,7 +542,7 @@ def rule3_links(rows_of, rosters, facts):
     after_anchor = {**after_guard, **{group: ("season_anchor", fbref_id) for group, fbref_id in anchors.links.items()}}
     after_anchor_guard = {group: link for group, link in after_anchor.items() if link[0] != "season_anchor" or anchor_guard[anchor_pair_of[group]][0] != "disagree"}
     collisions = id_collisions(after_anchor_guard)
-    colliding = {(league, season, understat_id) for (league, season, _), ids in collisions.items() for understat_id in ids}
+    colliding = colliding_player_seasons(collisions)
     final = {group: link for group, link in after_anchor_guard.items() if group.player_season not in colliding}
     return Rule3(joined, name_map, pair_of, name_map_rows, matches_of, guard, after_guard, anchors, anchor_pair_of, anchor_rows, anchor_matches, anchor_guard, after_anchor, after_anchor_guard, collisions, final)
 
@@ -858,6 +862,12 @@ def finish_join(rule3, rows_of, rosters, positions, decisions, refused, candidat
     if not anchors_checked:
         anchors_removed = drop_anchors_without_evidence(rule3, rows, items, links)
 
+    # Fixed before any combine, so the result does not depend on how the ids sort: the links that stand, and those rule 3's guard took unless a collision holds the player-season (D45).
+    colliding = colliding_player_seasons(rule3.collisions)
+    combine_rechecks = {
+        step: {group for group, link in links.items() if link[0] == step} | {group for group, pair in first_pairs.items() if group not in links and group not in rejected_groups and group.player_season not in colliding and first_verdicts[pair][0] == "disagree"}
+        for step, first_pairs, first_verdicts in (("map", rule3.pair_of, rule3.guard), ("season_anchor", rule3.anchor_pair_of, rule3.anchor_guard))
+    }
     for (league, year, old_id), new_id in sorted(combine.items()):
         if (league, year, new_id) in combine:
             stop(f"link_to on {player_season_key((league, year, old_id))} names {new_id}, and {player_season_key((league, year, new_id))} has its own link_to. Name the id the record ends under.")
@@ -874,7 +884,7 @@ def finish_join(rule3, rows_of, rosters, positions, decisions, refused, candidat
             fbref_names={**facts.fbref_names, new_key: sorted({*facts.fbref_names.get(new_key, []), *facts.fbref_names.get(old_key, [])})},
             fbref_clubs={**facts.fbref_clubs, new_key: {*facts.fbref_clubs.get(new_key, ()), *facts.fbref_clubs.get(old_key, ())}},
         )
-        for step, pairs, first_pairs, verdicts, removed_verdicts, row_counts, match_counts in (("map", pair_of, rule3.pair_of, guard, rule3.guard, name_map_rows, matches_of), ("season_anchor", anchor_pair_of, rule3.anchor_pair_of, anchor_guard, rule3.anchor_guard, anchor_rows, anchor_matches)):
+        for step, pairs, verdicts, row_counts, match_counts in (("map", pair_of, guard, name_map_rows, matches_of), ("season_anchor", anchor_pair_of, anchor_guard, anchor_rows, anchor_matches)):
             # Read before any row moves: one approval covers every group of a pair, on either id. From the rows too, because a verdict reads `approved` only if it was `disagree` when the row applied.
             approved_pairs = approved_by_row[step] | {pair for pair, verdict in verdicts.items() if verdict[0] == "approved"}
             # The approval moves with its pair, so a later combine under new_id still sees it.
@@ -893,10 +903,7 @@ def finish_join(rule3, rows_of, rosters, positions, decisions, refused, candidat
                 verdict = minutes_guard([new_pair], facts)[new_pair]
                 kept_by_ahmed = new_pair in approved_pairs and verdict[0] == "disagree"
                 verdicts[new_pair] = ("approved", *verdict[1:]) if kept_by_ahmed else verdict
-                current = links.get(group)
-                # The group's first pair, because after one combine its current pair is not in rule 3's verdicts.
-                guard_took_it = current is None and removed_verdicts.get(first_pairs.get(group), ("",))[0] == "disagree"
-                if group in rejected_groups or (current and current[0] != step) or not (current or guard_took_it):
+                if group not in combine_rechecks[step]:
                     continue
                 if verdicts[new_pair][0] == "disagree":
                     links.pop(group, None)

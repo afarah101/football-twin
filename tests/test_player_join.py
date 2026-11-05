@@ -1818,6 +1818,56 @@ class StageDReviewDecisions(unittest.TestCase):
                 anchor_rosters = {("m1", "A"): hand_roster(("c", "Kike")), ("m2", "A"): hand_roster(("c", "Kike")), ("m3", "A"): hand_roster(("c", "Kike Garcia"), ("w", "Kike Lopez")), **others}
                 self.assertEqual(hand_run(anchor_rows, anchor_rosters, rows, refused=refused, facts=facts).rule3.final[anchored], ("season_anchor", "x"))
 
+    def test_d_synthetic_collided_player_season_regains_no_link_through_a_combine(self):
+        # synthetic: 0 real collisions after the guard (design check). D45: the guard took the link at rule 3 and the collision holds the player-season, so a combine brings nothing back.
+        x, t = ("ESP", 2022, "x"), ("ESP", 2022, "t")
+        shot_names = {("ESP", 2021, 1): {"Kike"}, ("ESP", 2021, 2): {"Kike"}}
+        rosters = {("m1", "A"): hand_roster(("x", "Kike")), ("m2", "A"): hand_roster(("x", "Kike")), ("m3", "A"): hand_roster(("x", "Kike Garcia"), ("w", "Kike Lopez")), ("m4", "A"): hand_roster(("x", "Kike"))}
+        rows_of = {hand_group("m1"): 1, hand_group("m2"): 1, hand_group("m3"): 98, hand_group("m4", 2): 1}
+        reject = decision("name_map", "ESP|2021|1|Kike|x", "reject")
+        into_t = decision("player_season", "ESP|2021|x", "link_to", "t")
+        into_x = decision("player_season", "ESP|2021|c", "link_to", "x")
+        with_t = {**rosters, ("m9", "B"): hand_roster(("t", "Tee"))}
+        with_c = {**rosters, ("m9", "B"): hand_roster(("c", "Cee"))}
+        for label, found_rosters, rows, candidates, minutes, refused in (
+            ("evidence gone", with_t, [reject, into_t], [x, t], {"x": 100, "t": 800}, ()),
+            ("collision alone", with_t, [into_t], [x, t], {"x": 100, "t": 800}, ()),
+            ("evidence gone, c into x", with_c, [reject, into_x], [x], {"x": 100, "c": 800}, [join.RefusedMerge("ESP", 2022, "Kike", ("c", "q"), "both ids in other seasons")]),
+        ):
+            with self.subTest(label):
+                result = hand_run(rows_of, found_rosters, rows, candidates, refused=refused, facts=hand_facts(minutes, shot_names=shot_names))
+                self.assertEqual(result.rule3.final, {})
+                self.assertEqual(result.partial, {("ESP", 2021, 1): (0, 100), ("ESP", 2021, 2): (0, 1)})
+                self.assertEqual(list(result.pool), [])
+        # The same rule on a map link: the guard took Understat 1's map link on x, and its exact link on x is in the collision.
+        map_rosters = {("m1", "A"): hand_roster(("x", "Kike")), ("m2", "A"): hand_roster(("x", "Kike Garcia")), ("m4", "A"): hand_roster(("x", "Kike")), ("m9", "B"): hand_roster(("t", "Tee"))}
+        with self.subTest("map link"):
+            result = hand_run({hand_group("m1"): 1, hand_group("m2"): 99, hand_group("m4", 2): 1}, map_rosters, [into_t], [x, t], facts=hand_facts({"x": 100, "t": 800}, shot_names=shot_names))
+            self.assertEqual(result.rule3.final, {})
+            self.assertEqual(list(result.pool), [])
+
+    def test_d_synthetic_link_a_combine_guard_removed_gives_one_result_whichever_way_ids_sort(self):
+        # synthetic: 0 real rows. With `d`, the first combine's guard says `disagree`. The final verdict is the same either way, so the result must be too.
+        group, x = hand_group("m1"), ("ESP", 2022, "x")
+        ends_on_agree = {("ESP", 2021, "Xav"): [join.SeasonRow({"Q"}, 200)], ("ESP", 2021, "Dan"): [join.SeasonRow({"B"}, 700)]}
+        ends_on_none = {("ESP", 2021, "Kike"): [join.SeasonRow({"A"}, 900), join.SeasonRow({"B"}, 2000)]}
+        for second in ("b", "d"):
+            refused = [join.RefusedMerge("ESP", 2022, "Kike", ("c", "q"), "both ids in other seasons"), join.RefusedMerge("ESP", 2022, "Dan", (second, "y9"), "both ids in other seasons")]
+            rows = [decision("player_season", "ESP|2021|c", "link_to", "x"), decision("player_season", f"ESP|2021|{second}", "link_to", "x")]
+            rosters = {("m1", "A"): hand_roster(("c", "Kike Garcia")), ("m4", "A"): hand_roster(("x", "Xav")), ("m5", "B"): hand_roster((second, "Dan"))}
+            clubs = {("ESP", 2022, "c"): {"A"}, ("ESP", 2022, "x"): {"A"}, ("ESP", 2022, second): {"B"}}
+            names = {("ESP", 2022, "c"): ["Kike Garcia"], ("ESP", 2022, "x"): ["Xav"], ("ESP", 2022, second): ["Dan"]}
+            for verdict, facts in (
+                (("agree", 700, 700), hand_facts({"c": 500, "x": 100, second: 100}, season_rows=ends_on_agree, fbref_names=names, fbref_clubs=clubs)),
+                (("none", None, 1500), hand_facts({"c": 900, "x": 500, second: 100}, season_rows=ends_on_none, fbref_clubs=clubs)),
+            ):
+                with self.subTest(second=second, final_verdict=verdict[0]):
+                    result = hand_run({group: 5}, rosters, rows, [x], refused=refused, facts=facts)
+                    self.assertEqual(result.rule3.guard[join.PlayerSeasonName(*group.player_season_name, "x")], verdict)
+                    self.assertEqual(result.rule3.final, {group: ("map", "x")})
+                    self.assertEqual(result.partial, {})
+                    self.assertEqual(list(result.pool), [x])
+
     def test_d_synthetic_reject_on_an_id_holds_only_player_seasons_it_reaches(self):
         # synthetic: 0 real rows. Both of the player-season's groups move from y to z, so `reject` on y says nothing about z.
         y, z = ("ESP", 2022, "y"), ("ESP", 2022, "z")
@@ -1827,6 +1877,16 @@ class StageDReviewDecisions(unittest.TestCase):
         result = hand_run({first: 5, second: 5}, rosters, rows, [y, z], facts=hand_facts({"y": 900, "z": 900}))
         self.assertEqual(result.partial, {})
         self.assertIn(z, result.pool)
+
+    def test_d_synthetic_reject_on_an_id_holds_a_player_season_a_combine_brought_there(self):
+        # synthetic: 0 real rows. The player-season reaches y only after the combine, so `reject` must read the links after the combines.
+        y = ("ESP", 2022, "y")
+        rosters = {("m1", "A"): hand_roster(("c", "Kike")), ("m9", "B"): hand_roster(("y", "Why"))}
+        rows = [decision("player_season", "ESP|2021|c", "link_to", "y"), decision("player_season", "ESP|2021|y", "reject")]
+        result = hand_run({hand_group("m1"): 5}, rosters, rows, [y], refused=[join.RefusedMerge("ESP", 2022, "Kike", ("c", "q"), "both ids in other seasons")], facts=hand_facts({"c": 900, "y": 0}))
+        self.assertEqual(result.partial, {("ESP", 2021, 1): (5, 5)})
+        self.assertEqual(result.flags[y], {"partial_join", "rejected"})
+        self.assertNotIn(y, result.pool)
 
     def test_d_synthetic_reject_on_an_id_from_a_decision_keeps_partial_join(self):
         # synthetic: 0 real rows. The same `reject` holds the player-season, whether rule 3 or a decision reached the id.
