@@ -989,6 +989,18 @@ def finish_join(rule3, rows_of, rosters, positions, decisions, refused, candidat
         rejected = rejected_by[group]
         stop(f"final check: {group.name} ({partial_join_key(group.player_season)}) in match {group.match} is joined on {links[group][1]} by {' and '.join(routes)}, but reject on {rejected['item_type']} {rejected['key']} left it unjoined. Keep one.")
 
+    # Final check (D48): a merge_ids row covers only the Understat ids it names: the one on its key, the one rule 3 already holds on that FBref id, and, on a link key, the rule 3 collision it restores (D38). Both runs stop, as for D46 and D47.
+    for key, ids in collisions_now.items():
+        rows_on_id = [row for row in merge_rows if row["fbref_id"] == key[2] and row["key"].split("|")[:2] == [key[0], str(key[1])]]
+        named = {int(row["key"].split("|")[2]) for row in rows_on_id} | {group.understat_id for group, link in rule3.final.items() if (group.league, group.season, link[1]) == key}
+        if any(row["item_type"] in LINK_ITEM_TYPES for row in rows_on_id):
+            named |= set(rule3.collisions.get(key, []))
+        for understat_id in sorted(set(ids) - named):
+            groups = [group for group, link in links.items() if group.player_season == (key[0], key[1], understat_id) and link[1] == key[2]]
+            routes = [f"{row['decision']} on {row['item_type']} {row['key']}" for row in rows if row["decision"] != "reject" and (row["key"] == partial_join_key((key[0], key[1], understat_id)) if row["item_type"] == "partial_join" else row["item_type"] in LINK_ITEM_TYPES and items[(row["item_type"], row["key"])].keys() & set(groups))]
+            routes += combines_onto(groups[0])
+            stop(f"final check: two Understat ids {ids} on FBref id {key[2]} in {key[0]} {key[1]}: Understat id {understat_id} is named in no merge_ids row with the others, and {' and '.join(routes) or 'a ' + links[groups[0]][0] + ' link'} put it there.")
+
     pool = pool_of(candidates_after, flags)
     finished = rule3._replace(final=links, guard=guard, pair_of=pair_of, name_map_rows=+name_map_rows, matches_of=+matches_of, anchor_guard=anchor_guard, anchor_pair_of=anchor_pair_of, anchor_rows=+anchor_rows, anchor_matches=+anchor_matches)
     joined_before, joined_after = (sum(rows_of[group] for group in stage) for stage in (rule3.final, links))

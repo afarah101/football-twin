@@ -1915,6 +1915,55 @@ class StageDReviewDecisions(unittest.TestCase):
         facts = hand_facts({"b": 150, "d": 0}, season_rows={("ESP", 2021, "Kike"): [join.SeasonRow({"A"}, 150)]}, shot_names={("ESP", 2021, 1): {"Kike"}, ("ESP", 2021, 2): {"Kike"}})
         self.assert_stops("two Understat ids [1, 2]", "FBref id b", rows_of=rows_of, rosters=rosters, decisions=[decision("name_map", "ESP|2021|1|Kike|b", "approve")], candidates=[("ESP", 2022, "b")], facts=facts, merges_on=False)
 
+    def assert_third_id_stops(self, route, **run):
+        # D48: Understat 3 is named in no merge_ids row, so both runs stop and name the FBref id, the ids and the route.
+        for merges_on in (True, False):
+            with self.subTest(merges_on=merges_on):
+                self.assert_stops("final check", "FBref id x", "[1, 2, 3]", "Understat id 3", route, merges_on=merges_on, **run)
+
+    def test_d_synthetic_merge_ids_row_does_not_cover_a_link_to_on_a_third_id(self):
+        # synthetic: 0 real rows. D48: Understat 1 is exact on x, and the row for Understat 2 must not let Understat 3 on.
+        rows_of = {hand_group("m1"): 10, hand_group("m2", 2, "Enrique"): 10, hand_group("m3", 3, "Paco"): 10}
+        rosters = {("m1", "A"): hand_roster(("x", "Kike")), ("m2", "A"): hand_roster(("x", "Xavi")), ("m3", "A"): hand_roster(("x", "Xavi"))}
+        second = decision("partial_join", "ESP|2021|2", "merge_ids", "x")
+        third = decision("partial_join", "ESP|2021|3", "link_to", "x")
+        self.assert_third_id_stops("link_to on partial_join ESP|2021|3", rows_of=rows_of, rosters=rosters, decisions=[second, third])
+        # The way back: a merge_ids row that names Understat 3 as well.
+        named = hand_run(rows_of, rosters, [second, decision("partial_join", "ESP|2021|3", "merge_ids", "x")])
+        self.assertEqual(join.id_collisions(named.rule3.final), {("ESP", 2021, "x"): [1, 2, 3]})
+
+    def test_d_synthetic_merge_ids_row_on_a_collision_does_not_cover_a_link_to_on_a_third_id(self):
+        # synthetic: 0 real rows. D48: Understat 1 and 2 collide on x in rule 3, so one row covers them (D38), and only them.
+        rows_of = {hand_group("m1"): 10, hand_group("m2", 2): 10, hand_group("m3", 3, "Paco"): 10}
+        rosters = {("m1", "A"): hand_roster(("x", "Kike")), ("m2", "A"): hand_roster(("x", "Kike")), ("m3", "A"): hand_roster(("x", "Xavi"))}
+        merge = decision("name_map", "ESP|2021|1|Kike|x", "merge_ids", "x")
+        self.assert_third_id_stops("link_to on partial_join ESP|2021|3", rows_of=rows_of, rosters=rosters, decisions=[merge, decision("partial_join", "ESP|2021|3", "link_to", "x")])
+        self.assertEqual(join.id_collisions(hand_run(rows_of, rosters, [merge]).rule3.final), {("ESP", 2021, "x"): [1, 2]})
+        # A partial_join row does not restore the collision (D38), so it names only Understat 3, and the `approve` brings Understat 1 with no row.
+        off_the_collision = [decision("partial_join", "ESP|2021|3", "merge_ids", "x"), decision("name_map", "ESP|2021|1|Kike|x", "approve")]
+        for merges_on in (True, False):
+            with self.subTest("row off the collision", merges_on=merges_on):
+                self.assert_stops("final check", "FBref id x", "[1, 3]", "Understat id 1", "approve on name_map ESP|2021|1|Kike|x", rows_of=rows_of, rosters=rosters, decisions=off_the_collision, merges_on=merges_on)
+
+    def test_d_synthetic_merge_ids_row_does_not_cover_an_approve_on_a_third_id(self):
+        # synthetic: 0 real rows. D48: the guard takes Understat 3's map link, and its `approve` is not a merge_ids row.
+        rows_of = {hand_group("m1"): 10, hand_group("m2", 2, "Enrique"): 10, hand_group("m3", 3, "Paco"): 10}
+        rosters = {("m1", "A"): hand_roster(("x", "Kike")), ("m2", "A"): hand_roster(("x", "Xavi")), ("m3", "A"): hand_roster(("x", "Pablo Paco"))}
+        facts = hand_facts({"x": 900}, season_rows={("ESP", 2021, "Paco"): [join.SeasonRow({"A"}, 3000)]}, shot_names={("ESP", 2021, 3): {"Paco"}})
+        second = decision("partial_join", "ESP|2021|2", "merge_ids", "x")
+        self.assert_third_id_stops("approve on name_map ESP|2021|3|Paco|x", rows_of=rows_of, rosters=rosters, decisions=[second, decision("name_map", "ESP|2021|3|Paco|x", "approve")], facts=facts)
+        # The way back: merge_ids on the same key names Understat 3.
+        named = hand_run(rows_of, rosters, [second, decision("name_map", "ESP|2021|3|Paco|x", "merge_ids", "x")], facts=facts)
+        self.assertEqual(join.id_collisions(named.rule3.final), {("ESP", 2021, "x"): [1, 2, 3]})
+
+    def test_d_synthetic_merge_ids_row_does_not_cover_a_combine_that_brings_a_third_id(self):
+        # synthetic: 0 real rows. D48, spec:93: the combine brings Understat 3 from c to x, and the row on x names only 1 and 2.
+        rows_of = {hand_group("m1"): 10, hand_group("m2", 2): 10, hand_group("m3", 3, "Paco"): 10}
+        rosters = {("m1", "A"): hand_roster(("x", "Kike")), ("m2", "A"): hand_roster(("x", "Kike")), ("m3", "A"): hand_roster(("c", "Paco"))}
+        refused = [join.RefusedMerge("ESP", 2022, "Paco", ("c", "q"), "both ids in other seasons")]
+        rows = [decision("name_map", "ESP|2021|1|Kike|x", "merge_ids", "x"), decision("player_season", "ESP|2021|c", "link_to", "x")]
+        self.assert_third_id_stops("link_to on player_season ESP|2021|c to x", rows_of=rows_of, rosters=rosters, decisions=rows, refused=refused)
+
     def test_d_synthetic_reject_on_an_id_holds_only_player_seasons_it_reaches(self):
         # synthetic: 0 real rows. Both of the player-season's groups move from y to z, so `reject` on y says nothing about z.
         y, z = ("ESP", 2022, "y"), ("ESP", 2022, "z")
