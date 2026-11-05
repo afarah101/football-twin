@@ -716,11 +716,10 @@ def finish_join(rule3, rows_of, rosters, positions, decisions, refused, candidat
     candidates = candidates_of(positions)
     candidate_set = set(candidates)
     partial_before = partial_joins(rows_of, rule3.final)
-    flags_before = review_flags(candidates, rule3.final, partial_before, rule3.name_map.two_ids)
+    flags_before = review_flags(candidates, rule3.final, partial_before, two_id_player_seasons(rule3.final, rosters, []))
     items = link_items(rule3)
     counts = join_counts(rows_of, rule3.final)
     partial_keys = {partial_join_key(key): key for key, (found, total) in counts.items() if found < total}
-    refused_ids = {player_season_key((case.league, case.year, fbref_id)) for case in refused for fbref_id in case.ids}
     season_keys = {player_season_key(key): key for key in flags_before if key in candidate_set}
     season_keys.update({player_season_key((case.league, case.year, fbref_id)): (case.league, case.year, fbref_id) for case in refused for fbref_id in case.ids})
     in_league_season = set(zip(positions["league"], positions["Season_End_Year"], positions["fbref_id"]))
@@ -750,6 +749,13 @@ def finish_join(rule3, rows_of, rosters, positions, decisions, refused, candidat
         if merges_on and not holds:
             stop(message)
 
+    # One group can sit under two keys, and `approve` on one with `link_to` on the other would split the player (spec:115).
+    approved_rows = [row for row in rows if row["item_type"] in LINK_ITEM_TYPES and row["decision"] == "approve"]
+    for row in rows:
+        if row["item_type"] in LINK_ITEM_TYPES and row["decision"] in ("link_to", "merge_ids"):
+            for other in approved_rows:
+                must(items[(row["item_type"], row["key"])].keys().isdisjoint(items[(other["item_type"], other["key"])]), f"{row['decision']} on {row['item_type']} {row['key']} and approve on {other['item_type']} {other['key']} name one shot group. Keep one.")
+
     def move_rows(groups, row):
         for group in groups:
             must(row["fbref_id"] in ids_at_club[(group.match, group.club)], f"{row['decision']} on {row['key']}: {row['fbref_id']} has no FBref row in match {group.match} for {group.club}")
@@ -764,6 +770,7 @@ def finish_join(rule3, rows_of, rosters, positions, decisions, refused, candidat
     approved_partial, kept_partial, approved_seasons, rejected_seasons, unjoined_listed = set(), set(), set(), set(), []
     merged, settled, decided, combine, merge_rows, allowed_ids, merged_collisions = set(), set(), defaultdict(set), {}, [], set(), []
     anchors_removed, anchors_checked = [], False
+    approved_by_row = {"map": set(), "season_anchor": set()}
     for row in rows:
         kind, key, verdict = row["item_type"], row["key"], row["decision"]
         if kind in LINK_ITEM_TYPES:
@@ -781,6 +788,8 @@ def finish_join(rule3, rows_of, rosters, positions, decisions, refused, candidat
             if verdict == "approve":
                 links.update(found)
                 for group, link in found.items():
+                    if link[0] in approved_by_row:
+                        approved_by_row[link[0]].add(PlayerSeasonName(*group.player_season_name, link[1]))
                     if link[0] == "map":
                         pair = PlayerSeasonName(*group.player_season_name, link[1])
                         if group not in pair_of:
@@ -867,8 +876,8 @@ def finish_join(rule3, rows_of, rosters, positions, decisions, refused, candidat
             fbref_clubs={**facts.fbref_clubs, new_key: {*facts.fbref_clubs.get(new_key, ()), *facts.fbref_clubs.get(old_key, ())}},
         )
         for step, pairs, verdicts, removed_verdicts, row_counts, match_counts in (("map", pair_of, guard, rule3.guard, name_map_rows, matches_of), ("season_anchor", anchor_pair_of, anchor_guard, rule3.anchor_guard, anchor_rows, anchor_matches)):
-            # Read before any row moves: one approval covers every group of a pair, on either id.
-            approved_pairs = {pair for pair, verdict in verdicts.items() if verdict[0] == "approved"}
+            # Read before any row moves: one approval covers every group of a pair, on either id. From the rows too, because a verdict reads `approved` only if it was `disagree` when the row applied.
+            approved_pairs = approved_by_row[step] | {pair for pair, verdict in verdicts.items() if verdict[0] == "approved"}
             for group, pair in list(pairs.items()):
                 if pair.fbref_id not in (old_id, new_id) or group.league != league or group.season != year - 1:
                     continue
@@ -901,7 +910,7 @@ def finish_join(rule3, rows_of, rosters, positions, decisions, refused, candidat
 
     # partial_join holds every id its player-season reaches, so it clears only when all of those ids are approved. Each id's own flag clears below.
     joined_ids = defaultdict(set)
-    for group, link in rule3.final.items():
+    for group, link in links.items():
         joined_ids[group.player_season].add(link[1])
     for league, year, fbref_id in approved_seasons:
         for player_season in understat_ids_on((league, year, fbref_id), rule3.final):

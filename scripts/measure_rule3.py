@@ -136,7 +136,7 @@ def measure(positions, shots, clubs, refused, merges_on):
     print("\n### Minutes guard")
     verdicts = Counter(result[0] for result in guard.values())
     print(f"Name map player-seasons {len(guard)}, rows {sum(name_map_rows.values())} | {dict(sorted(verdicts.items()))}")
-    kept_pairs = {pair: rows for pair, rows in name_map_rows.items() if guard[pair][0] != "disagree"}
+    kept_pairs = {pair: name_map_rows[pair] for pair in {pair_of[group] for group, link in final.items() if link[0] == "map"}}
     print(f"Keep their link: {len(kept_pairs)} player-seasons, {sum(kept_pairs.values())} rows")
     review = guard_review_list(rule3)
     for pair in [*review["disagree"], *review["approved"]]:

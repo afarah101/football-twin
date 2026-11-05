@@ -997,6 +997,12 @@ def collision_case():
     return first, second, {first: 1, second: 1}, {("m1", "A"): hand_roster(("x", "Kike")), ("m2", "A"): hand_roster(("x", "Kike"))}
 
 
+def two_id_conflict_case():
+    """Exact links to w and z with different names, plus a step 2 link that stops, so the player-season sits in `conflicts`."""
+    rows_of = {hand_group("m1", name="Enrique", club="B"): 40, hand_group("m3", name="Kike"): 2, hand_group("m4", name="Kike"): 2}
+    return rows_of, {("m1", "B"): hand_roster(("z", "Enrique")), ("m3", "A"): hand_roster(("w", "Kike")), ("m4", "A"): hand_roster(("x", "Kike Garcia"))}
+
+
 def no_shots_case():
     """Candidate c has no joined shots. x holds one exact link, in another match."""
     group = hand_group("m1")
@@ -1577,9 +1583,12 @@ class StageDReviewDecisions(unittest.TestCase):
         with self.assertRaises(SystemExit) as stop:
             join.finish_join(join.rule3_links(rows_of, join.build_rosters(unmerged), facts), rows_of, join.build_rosters(unmerged), unmerged, [], [], lambda found: [], facts, True)
         self.assertIn("cross_season_ids", str(stop.exception))
-        # A key that exists only on merged ids stops the merges-on run, and the merges-off run passes over it.
+
+    def test_d_synthetic_merges_off_run_passes_over_rows_good_only_on_merged_ids(self):
+        # synthetic: 0 real rows. D21: a key that exists only on merged ids stops the merges-on run, and the merges-off run passes over it.
+        unmerged = join.positions_for_join(SAMPLE, merges=False)
         row = decision("player_season", "ITA|2023|nobody", "reject")
-        self.assertEqual(sample_finish([row], unmerged, merges_on=False).joined_after, off.joined_after)
+        self.assertEqual(sample_finish([row], unmerged, merges_on=False).joined_after, sample_finish([], unmerged, merges_on=False).joined_after)
         with self.assertRaises(SystemExit):
             sample_finish([row])
         # So does a row good only on merged ids: the survivor has no FBref row in this match until the merge.
@@ -1675,6 +1684,64 @@ class StageDReviewDecisions(unittest.TestCase):
         self.assertNotIn("Use link_to", str(stop.exception))
         result = sample_finish([decision("partial_join", "ESP|2023|5159", "reject")])
         self.assertIn(("ESP", 2023, 5159), result.unjoined_listed)
+
+    def test_d_synthetic_second_id_from_a_decision_keeps_partial_join(self):
+        # synthetic: 0 real rows. `approve` on x must not clear partial_join on y. y comes from a decision, and x and y share a name, so no `two ids` flag holds it.
+        x, y = ("ESP", 2022, "x"), ("ESP", 2022, "y")
+        rows_of = {hand_group("m1", name="Kike"): 3, hand_group("m2", name="Kike Lopez", club="B"): 3, hand_group("m3", name="Zed"): 1}
+        rosters = {("m1", "A"): hand_roster(("x", "Kike")), ("m2", "B"): hand_roster(("y", "Kike")), ("m3", "A"): hand_roster(("w", "Other"))}
+        rows = [decision("name_map", "ESP|2021|1|Kike Lopez|y", "approve"), decision("player_season", "ESP|2021|x", "approve"), decision("cross_season_ids", "1", "approve")]
+        result = hand_run(rows_of, rosters, rows, [x, y], facts=hand_facts({"x": 900, "y": 900}))
+        self.assertEqual(join.join_counts(rows_of, result.rule3.final)[("ESP", 2021, 1)], (6, 7))  # 85.7%, under the 95% line
+        self.assertNotIn(y, result.pool)
+
+    def test_d_synthetic_approve_on_an_agreeing_link_survives_a_combine(self):
+        # synthetic: 0 real rows. The same approve row and the same combined verdict must give the same result, whatever the verdict before the combine.
+        rosters = {("m1", "A"): hand_roster(("x", "Kike Garcia")), ("m3", "A"): hand_roster(("c", "Carlos"))}
+        group = hand_group("m1")
+        rows = [decision("name_map", "ESP|2021|1|Kike|x", "approve"), decision("player_season", "ESP|2021|c", "link_to", "x")]
+        was_disagree = hand_run({group: 5}, rosters, rows, [("ESP", 2022, "c")], facts=hand_facts({"x": 100, "c": 500}))
+        was_agree = hand_run({group: 5}, rosters, rows, [("ESP", 2022, "c")], facts=hand_facts({"x": 900, "c": 500}))
+        self.assertEqual(was_disagree.rule3.final, {group: ("map", "x")})
+        self.assertEqual(was_agree.rule3.final, {group: ("map", "x")})
+
+    def test_d_synthetic_pool_before_counts_the_two_id_hold(self):
+        # synthetic: 0 real rows. Q3 holds a two-id candidate with different names, so with no real decision the Pool before and after agree.
+        rows_of, rosters = two_id_conflict_case()
+        result = hand_run(rows_of, rosters, [decision("cross_season_ids", "1", "approve")], [("ESP", 2022, "w"), ("ESP", 2022, "z")])
+        self.assertEqual(result.flags[("ESP", 2022, "w")], {"two ids"})
+        self.assertEqual(result.pool_before, result.pool_after)
+
+    def test_d_synthetic_held_two_id_candidate_has_a_review_key(self):
+        # synthetic: 0 real rows. spec:105: a key exists if the id is a Pool candidate flagged for any reason, two ids included.
+        rows_of, rosters = two_id_conflict_case()
+        rows = [decision("cross_season_ids", "1", "approve"), decision("player_season", "ESP|2021|w", "approve")]
+        result = hand_run(rows_of, rosters, rows, [("ESP", 2022, "w"), ("ESP", 2022, "z")])
+        self.assertIn(("ESP", 2022, "w"), result.pool)
+
+    def test_d_synthetic_approve_and_link_to_on_one_collided_anchor_stop(self):
+        # synthetic: 0 real collisions. spec:115, one case one answer: `link_to` on the name_map key and `approve` on the season_anchor key name one group, and the player would split.
+        rows_of = {hand_group("m1"): 5, hand_group("m2"): 5, hand_group("m3"): 5, hand_group("m4", 2): 5}
+        both = (("z", "Enrique"),)
+        rosters = {("m1", "A"): hand_roster(("x", "Kike"), *both), ("m2", "A"): hand_roster(("x", "Kike"), *both), ("m3", "A"): hand_roster(("x", "Kike Garcia"), ("w", "Kike Lopez"), *both), ("m4", "A"): hand_roster(("x", "Kike"))}
+        key = "ESP|2021|1|Kike|x"
+        rows = [decision("name_map", key, "link_to", "z"), decision("season_anchor", key, "approve"), decision("name_map", "ESP|2021|2|Kike|x", "reject"), decision("cross_season_ids", "1", "approve")]
+        self.assert_stops("link_to", "approve", key, "one shot group", rows_of=rows_of, rosters=rosters, decisions=rows, facts=hand_facts({"x": 900, "z": 900}))
+
+    def test_d_synthetic_keep_their_link_count_leaves_out_a_rejected_link(self):
+        # synthetic: hand-made `reject` on a real name map link, because the real file has no reject row. A rejected link keeps nothing.
+        before = sample_finish([]).rule3
+        pair, rows = next((pair, rows) for pair, rows in sorted(before.name_map_rows.items()) if before.guard[pair][0] == "agree")
+
+        def keep_line(decisions):
+            printed = io.StringIO()
+            with mock.patch.object(script, "season_rows_by_name", lambda clubs: join.season_rows_by_name(clubs, SAMPLE)), mock.patch.object(script, "read_review_decisions", lambda: decisions), mock.patch.object(script, "pool_candidates", lambda found: join.pool_candidates(found, SAMPLE)), contextlib.redirect_stdout(printed):
+                script.measure(sample_merged(), sample_shots(), sample_clubs(), [], merges_on=False)
+            line = next(line for line in printed.getvalue().splitlines() if line.startswith("Keep their link:"))
+            return [int(word) for word in line.replace(",", "").split() if word.isdigit()]
+
+        pairs, kept_rows = keep_line([])
+        self.assertEqual(keep_line([decision("name_map", join.decision_key(pair), "reject")]), [pairs - 1, kept_rows - rows])
 
 
 class MovedFromTheOldTestFile(unittest.TestCase):
