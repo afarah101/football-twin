@@ -233,7 +233,7 @@ Prior art: `tests/test_measure_rule3.py` tests the real Chema, Hwang and Baba ca
 
 ### Rule 3 clause table
 
-Stage A also holds the rule 1, 2 and id merge clauses, because Ahmed placed them in ticket 1. MEASURED counts come from the design check or the cited line. 184 clauses: 70 real, 114 `synthetic`. A hand-made decision row on real data rows counts as `synthetic`, because only 1 real decision row exists.
+Stage A also holds the rule 1, 2 and id merge clauses, because Ahmed placed them in ticket 1. MEASURED counts come from the design check or the cited line. 187 clauses: 70 real, 117 `synthetic`. A hand-made decision row on real data rows counts as `synthetic`, because only 1 real decision row exists.
 
 | Clause | Plan line | Ticket 1 stage | Test name | Real or `synthetic` |
 |---|---|---|---|---|
@@ -418,6 +418,9 @@ Stage A also holds the rule 1, 2 and id merge clauses, because Ahmed placed them
 | `approve` clears `partial_join` on an id that a decision added | D36 | D | `test_d_synthetic_approve_on_an_id_from_a_decision_clears_partial_join` | synthetic: 0 real rows |
 | `approve` clears `partial_join` on an id the player-season reaches only through a combine | D36 | D | `test_d_synthetic_approve_on_a_combined_id_clears_partial_join` | synthetic: 0 real rows |
 | `approve` on a `player_season` key with `reject` on its `partial_join` key stops when the id comes from a decision or a combine, on the merges-on run | D36 | D | `test_d_synthetic_approve_and_reject_on_an_id_from_a_decision_stop` | synthetic: 0 real rows |
+| A link the guard removed comes back after two combines when the final verdict agrees, whichever way the ids sort | D31 | D | `test_d_synthetic_guard_removed_link_returns_after_two_combines` | synthetic: 0 real rows |
+| `reject` on a `player_season` holds only the player-seasons its id still reaches | 145 | D | `test_d_synthetic_reject_on_an_id_holds_only_player_seasons_it_reaches` | synthetic: 0 real rows |
+| `reject` on a `player_season` keeps `partial_join` on an id that a decision added | 145 | D | `test_d_synthetic_reject_on_an_id_from_a_decision_keeps_partial_join` | synthetic: 0 real rows |
 | `Keep their link` leaves out a rejected link | 142 | D | `test_d_synthetic_keep_their_link_count_leaves_out_a_rejected_link` | synthetic: 0 real rows |
 | The merges-off run passes over a row good only on merged ids, and the merges-on run stops on it | D21 | D | `test_d_synthetic_merges_off_run_passes_over_rows_good_only_on_merged_ids` | synthetic: 0 real rows |
 

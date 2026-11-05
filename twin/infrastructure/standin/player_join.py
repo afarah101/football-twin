@@ -850,7 +850,6 @@ def finish_join(rule3, rows_of, rosters, positions, decisions, refused, candidat
             elif verdict == "reject":
                 if season_key in flags_before:
                     rejected_seasons.add(season_key)
-                    kept_partial |= understat_ids_on(season_key, rule3.final)
             else:
                 combine[season_key] = row["fbref_id"]
         else:
@@ -875,7 +874,7 @@ def finish_join(rule3, rows_of, rosters, positions, decisions, refused, candidat
             fbref_names={**facts.fbref_names, new_key: sorted({*facts.fbref_names.get(new_key, []), *facts.fbref_names.get(old_key, [])})},
             fbref_clubs={**facts.fbref_clubs, new_key: {*facts.fbref_clubs.get(new_key, ()), *facts.fbref_clubs.get(old_key, ())}},
         )
-        for step, pairs, verdicts, removed_verdicts, row_counts, match_counts in (("map", pair_of, guard, rule3.guard, name_map_rows, matches_of), ("season_anchor", anchor_pair_of, anchor_guard, rule3.anchor_guard, anchor_rows, anchor_matches)):
+        for step, pairs, first_pairs, verdicts, removed_verdicts, row_counts, match_counts in (("map", pair_of, rule3.pair_of, guard, rule3.guard, name_map_rows, matches_of), ("season_anchor", anchor_pair_of, rule3.anchor_pair_of, anchor_guard, rule3.anchor_guard, anchor_rows, anchor_matches)):
             # Read before any row moves: one approval covers every group of a pair, on either id. From the rows too, because a verdict reads `approved` only if it was `disagree` when the row applied.
             approved_pairs = approved_by_row[step] | {pair for pair, verdict in verdicts.items() if verdict[0] == "approved"}
             # The approval moves with its pair, so a later combine under new_id still sees it.
@@ -895,7 +894,8 @@ def finish_join(rule3, rows_of, rosters, positions, decisions, refused, candidat
                 kept_by_ahmed = new_pair in approved_pairs and verdict[0] == "disagree"
                 verdicts[new_pair] = ("approved", *verdict[1:]) if kept_by_ahmed else verdict
                 current = links.get(group)
-                guard_took_it = current is None and removed_verdicts.get(pair, ("",))[0] == "disagree"
+                # The group's first pair, because after one combine its current pair is not in rule 3's verdicts.
+                guard_took_it = current is None and removed_verdicts.get(first_pairs.get(group), ("",))[0] == "disagree"
                 if group in rejected_groups or (current and current[0] != step) or not (current or guard_took_it):
                     continue
                 if verdicts[new_pair][0] == "disagree":
@@ -914,6 +914,9 @@ def finish_join(rule3, rows_of, rosters, positions, decisions, refused, candidat
     # Again on the final links, because a decision or a combine can reach an id rule 3 did not. Merges-on only, so a row good only on merged ids does not stop the other run (D21).
     if merges_on:
         check_cases_agree(rows, links, refused)
+
+    for season_key in rejected_seasons:
+        kept_partial |= understat_ids_on(season_key, links)
 
     # partial_join holds every id its player-season reaches, so it clears only when all of those ids are approved. Each id's own flag clears below.
     joined_ids = defaultdict(set)

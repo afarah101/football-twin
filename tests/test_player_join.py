@@ -1797,6 +1797,41 @@ class StageDReviewDecisions(unittest.TestCase):
         rows = [decision("player_season", "ESP|2021|x", "link_to", "y"), decision("player_season", "ESP|2021|y", "approve"), decision("partial_join", "ESP|2021|1", "reject")]
         self.assert_stops("player_season ESP|2021|y", "partial_join ESP|2021|1", "disagree", rows_of=rows_of, rosters=rosters, decisions=rows, candidates=lambda found: [y] if "x" not in set(found["fbref_id"]) else [x, y], facts=hand_facts({"x": 900, "y": 10, "w": 900}))
 
+    def test_d_synthetic_guard_removed_link_returns_after_two_combines(self):
+        # synthetic: 0 real rows. The same final verdict must give the same result, whichever way the second id sorts against the first.
+        group, anchored = hand_group("m1"), hand_group("m3")
+        rows_of = {group: 5}
+        anchor_rows = {group: 1, hand_group("m2"): 1, anchored: 1}
+        for second in ("b", "d"):
+            with self.subTest(second=second):
+                refused = [join.RefusedMerge("ESP", 2022, "Kike", ("c", "x"), "both ids in other seasons"), join.RefusedMerge("ESP", 2022, "Dan", (second, "y9"), "both ids in other seasons")]
+                rows = [decision("player_season", "ESP|2021|c", "link_to", "x"), decision("player_season", f"ESP|2021|{second}", "link_to", "x")]
+                others = {("m4", "A"): hand_roster(("x", "Carlos")), ("m5", "A"): hand_roster((second, "Dan"))}
+                facts = hand_facts({"c": 100, "x": 100, second: 700})
+                mapped = hand_run(rows_of, {("m1", "A"): hand_roster(("c", "Kike Garcia")), **others}, rows, refused=refused, facts=facts)
+                self.assertEqual(mapped.rule3.final, {group: ("map", "x")})
+                anchor_rosters = {("m1", "A"): hand_roster(("c", "Kike")), ("m2", "A"): hand_roster(("c", "Kike")), ("m3", "A"): hand_roster(("c", "Kike Garcia"), ("w", "Kike Lopez")), **others}
+                self.assertEqual(hand_run(anchor_rows, anchor_rosters, rows, refused=refused, facts=facts).rule3.final[anchored], ("season_anchor", "x"))
+
+    def test_d_synthetic_reject_on_an_id_holds_only_player_seasons_it_reaches(self):
+        # synthetic: 0 real rows. Both of the player-season's groups move from y to z, so `reject` on y says nothing about z.
+        y, z = ("ESP", 2022, "y"), ("ESP", 2022, "z")
+        first, second = hand_group("m1"), hand_group("m2")
+        rosters = {("m1", "A"): hand_roster(("y", "Kike Garcia"), ("z", "Enrique")), ("m2", "A"): hand_roster(("z", "Enrique"))}
+        rows = [decision("name_map", "ESP|2021|1|Kike|y", "link_to", "z"), decision("partial_join", "ESP|2021|1", "link_to", "z"), decision("player_season", "ESP|2021|y", "reject")]
+        result = hand_run({first: 5, second: 5}, rosters, rows, [y, z], facts=hand_facts({"y": 900, "z": 900}))
+        self.assertEqual(result.partial, {})
+        self.assertIn(z, result.pool)
+
+    def test_d_synthetic_reject_on_an_id_from_a_decision_keeps_partial_join(self):
+        # synthetic: 0 real rows. The same `reject` holds the player-season, whether rule 3 or a decision reached the id.
+        _, _, rows_of, rosters, x_key, y_key = stopped_case()
+        x, y = ("ESP", 2022, "x"), ("ESP", 2022, "y")
+        rows = [decision("name_map", x_key, "approve"), decision("name_map", y_key, "approve"), decision("player_season", "ESP|2021|y", "reject"), decision("cross_season_ids", "1", "approve")]
+        result = hand_run(rows_of, rosters, rows, [x, y], facts=hand_facts({"x": 900, "y": 900, "z": 900}))
+        self.assertEqual(result.partial, {("ESP", 2021, 1): (2, 2)})
+        self.assertNotIn(x, result.pool)
+
     def test_d_synthetic_keep_their_link_count_leaves_out_a_rejected_link(self):
         # synthetic: hand-made `reject` on a real name map link, because the real file has no reject row. A rejected link keeps nothing.
         before = sample_finish([]).rule3
