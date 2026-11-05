@@ -1728,6 +1728,18 @@ class StageDReviewDecisions(unittest.TestCase):
         rows = [decision("name_map", key, "link_to", "z"), decision("season_anchor", key, "approve"), decision("name_map", "ESP|2021|2|Kike|x", "reject"), decision("cross_season_ids", "1", "approve")]
         self.assert_stops("link_to", "approve", key, "one shot group", rows_of=rows_of, rosters=rosters, decisions=rows, facts=hand_facts({"x": 900, "z": 900}))
 
+    def test_d_synthetic_two_link_to_on_one_collided_anchor_stop(self):
+        # synthetic: 0 real collisions. spec:115, one case one answer: two `link_to` rows name one group with different ids, and the last row would win silently. The same id is one answer.
+        rows_of = {hand_group("m1"): 5, hand_group("m2"): 5, hand_group("m3"): 5, hand_group("m4", 2): 5}
+        both = (("z", "Enrique"), ("q", "Quim"))
+        rosters = {("m1", "A"): hand_roster(("x", "Kike"), *both), ("m2", "A"): hand_roster(("x", "Kike"), *both), ("m3", "A"): hand_roster(("x", "Kike Garcia"), ("w", "Kike Lopez"), *both), ("m4", "A"): hand_roster(("x", "Kike"), *both)}
+        key, other_id = "ESP|2021|1|Kike|x", decision("name_map", "ESP|2021|2|Kike|x", "reject")
+        facts = hand_facts({"x": 900, "z": 900, "q": 900})
+        differ = [decision("name_map", key, "link_to", "z"), decision("season_anchor", key, "link_to", "q"), other_id, decision("cross_season_ids", "1", "approve")]
+        self.assert_stops("name_map", "season_anchor", key, "one shot group", rows_of=rows_of, rosters=rosters, decisions=differ, facts=facts)
+        same = [decision("name_map", key, "link_to", "z"), decision("season_anchor", key, "link_to", "z"), other_id]
+        self.assertEqual(hand_run(rows_of, rosters, same, facts=facts).rule3.final[hand_group("m3")], ("reviewed", "z"))
+
     def test_d_synthetic_keep_their_link_count_leaves_out_a_rejected_link(self):
         # synthetic: hand-made `reject` on a real name map link, because the real file has no reject row. A rejected link keeps nothing.
         before = sample_finish([]).rule3

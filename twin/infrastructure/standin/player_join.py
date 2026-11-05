@@ -749,12 +749,12 @@ def finish_join(rule3, rows_of, rosters, positions, decisions, refused, candidat
         if merges_on and not holds:
             stop(message)
 
-    # One group can sit under two keys, and `approve` on one with `link_to` on the other would split the player (spec:115).
+    # One group can sit under two keys, and `approve` on one with `link_to` on the other would split the player, while two `link_to` rows with different ids would let the last one win (spec:115).
     approved_rows = [row for row in rows if row["item_type"] in LINK_ITEM_TYPES and row["decision"] == "approve"]
-    for row in rows:
-        if row["item_type"] in LINK_ITEM_TYPES and row["decision"] in ("link_to", "merge_ids"):
-            for other in approved_rows:
-                must(items[(row["item_type"], row["key"])].keys().isdisjoint(items[(other["item_type"], other["key"])]), f"{row['decision']} on {row['item_type']} {row['key']} and approve on {other['item_type']} {other['key']} name one shot group. Keep one.")
+    moved_rows = [row for row in rows if row["item_type"] in LINK_ITEM_TYPES and row["decision"] in ("link_to", "merge_ids")]
+    for index, row in enumerate(moved_rows):
+        for other in [*approved_rows, *(later for later in moved_rows[index + 1:] if later["fbref_id"] != row["fbref_id"])]:
+            must(items[(row["item_type"], row["key"])].keys().isdisjoint(items[(other["item_type"], other["key"])]), f"{row['decision']} on {row['item_type']} {row['key']} and {other['decision']} on {other['item_type']} {other['key']} name one shot group. Keep one.")
 
     def move_rows(groups, row):
         for group in groups:
