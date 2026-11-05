@@ -141,10 +141,10 @@ def measure(positions, shots, clubs, refused, merges_on):
     review = guard_review_list(rule3)
     for pair in [*review["disagree"], *review["approved"]]:
         check, understat, fbref = guard.get(pair) or anchor_guard[pair]
-        print(f"  {check}: {pair.league} {pair.season} id {pair.understat_id} {html.unescape(pair.name)} to {names[pair.fbref_id]} {pair.fbref_id}: {understat} v {fbref}, gap {abs(understat - fbref)}, limit {minutes_limit(understat, fbref):.1f}, {name_map_rows[pair]} rows")
+        print(f"  {check}: {pair.league} {pair.season} id {pair.understat_id} {html.unescape(pair.name)} to {names[pair.fbref_id]} {pair.fbref_id}: {understat} v {fbref}, gap {abs(understat - fbref)}, limit {minutes_limit(understat, fbref):.1f}, {name_map_rows[pair] + anchor_rows[pair]} rows")
     for pair in review["none"]:
         _, _, fbref = guard.get(pair) or anchor_guard[pair]
-        print(f"  minutes_check = none: {pair.league} {pair.season} id {pair.understat_id} {html.unescape(pair.name)} to {names[pair.fbref_id]} {pair.fbref_id}: FBref {fbref}, {name_map_rows[pair]} rows")
+        print(f"  minutes_check = none: {pair.league} {pair.season} id {pair.understat_id} {html.unescape(pair.name)} to {names[pair.fbref_id]} {pair.fbref_id}: FBref {fbref}, {name_map_rows[pair] + anchor_rows[pair]} rows")
     passed, tried = chance_of_passing_guard(guard, fbref_minutes, roster_of_club, clubs_of_player)
     print(f"Wrong same-club players who would pass the limit: {passed} of {tried} ({100 * passed / tried:.1f}%)")
 

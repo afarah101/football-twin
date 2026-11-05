@@ -3,7 +3,9 @@
 A clause with 0 real cases uses a small hand-made input inside the test, says so in its name and in a comment, and never
 goes in tests/fixtures/. Run from the repo root: python3 -m unittest discover tests
 """
+import contextlib
 import html
+import io
 import sys
 import unittest
 from functools import lru_cache
@@ -1586,6 +1588,93 @@ class StageDReviewDecisions(unittest.TestCase):
         self.assertEqual(hand_run(rows_of, rosters, [moved], merges_on=False).joined_after, 2)
         with self.assertRaises(SystemExit):
             hand_run(rows_of, rosters, [moved])
+
+    def test_d_synthetic_reject_on_one_collision_id_keeps_the_collision_listed(self):
+        # synthetic: 0 real collisions. The other id is still unjoined, so the collision stays until each id has its row.
+        _, _, rows_of, rosters = collision_case()
+        one = [decision("name_map", "ESP|2021|1|Kike|x", "reject")]
+        self.assertEqual(hand_run(rows_of, rosters, one).collisions, {("ESP", 2021, "x"): [1, 2]})
+        both = [*one, decision("name_map", "ESP|2021|2|Kike|x", "reject")]
+        self.assertEqual(hand_run(rows_of, rosters, both).collisions, {})
+
+    def test_d_synthetic_approve_on_one_id_keeps_partial_join_on_the_other_id(self):
+        # synthetic: 0 real rows. One Understat player-season, under 95% joined, reaching x and y under one name.
+        rows_of = {hand_group("m1"): 1, hand_group("m2"): 1, hand_group("m3"): 8}
+        rosters = {("m1", "A"): hand_roster(("x", "Kike")), ("m2", "A"): hand_roster(("y", "Kike")), ("m3", "A"): hand_roster(("w", "Zed"))}
+        x, y = ("ESP", 2022, "x"), ("ESP", 2022, "y")
+        allowed = decision("cross_season_ids", "1", "approve")
+        result = hand_run(rows_of, rosters, [decision("player_season", "ESP|2021|x", "approve"), allowed], [x, y])
+        self.assertEqual((x in result.pool, y in result.pool), (True, False))
+        self.assertEqual(result.flags[y], {"partial_join"})
+        both = [decision("player_season", "ESP|2021|x", "approve"), decision("player_season", "ESP|2021|y", "approve"), allowed]
+        self.assertEqual(hand_run(rows_of, rosters, both, [x, y]).partial, {})
+
+    def test_d_synthetic_approve_on_anchor_key_does_not_restore_a_rejected_link(self):
+        # synthetic: 0 real collisions. The anchor link in m3 is under a name_map key and a season_anchor key, because of the collision.
+        anchor = hand_group("m3")
+        rows_of = {hand_group("m1"): 1, hand_group("m2"): 1, anchor: 1, hand_group("m4", 2): 1}
+        rosters = {("m1", "A"): hand_roster(("x", "Kike")), ("m2", "A"): hand_roster(("x", "Kike")), ("m3", "A"): hand_roster(("x", "Kike Garcia"), ("w", "Kike Lopez")), ("m4", "A"): hand_roster(("x", "Kike"))}
+        rows = [decision("name_map", "ESP|2021|1|Kike|x", "reject"), decision("season_anchor", "ESP|2021|1|Kike|x", "approve")]
+        self.assertNotIn(anchor, hand_run(rows_of, rosters, rows).rule3.final)
+
+    def test_d_synthetic_combined_id_keeps_its_two_ids_flag(self):
+        # synthetic: 0 real rows. After a to z, the player-season reaches z and w, under names that differ.
+        rows_of = {hand_group("m1"): 1, hand_group("m2"): 1}
+        rosters = {("m1", "A"): hand_roster(("a", "Kike")), ("m2", "A"): hand_roster(("w", "Kíke")), ("m3", "A"): hand_roster(("z", "Kike"))}
+        refused = [join.RefusedMerge("ESP", 2022, "Kike", ("a", "z"), "both ids in other seasons")]
+        w = ("ESP", 2022, "w")
+        rows = [decision("player_season", "ESP|2021|a", "link_to", "z"), decision("cross_season_ids", "1", "approve")]
+        result = hand_run(rows_of, rosters, rows, [w, ("ESP", 2022, "z")], refused)
+        self.assertEqual(result.rule3.final[hand_group("m1")][1], "z")
+        self.assertIn("two ids", result.flags.get(w, ()))
+
+    def test_d_synthetic_unflagged_partial_join_approve_does_not_stop_the_merges_off_run(self):
+        # synthetic: 0 real rows. The stop stays on the merges-on run (D21).
+        joined, unjoined, _, rosters = unjoined_case()
+        rows_of, row = {joined: 19, unjoined: 1}, decision("partial_join", "ESP|2021|1", "approve")
+        self.assertEqual(hand_run(rows_of, rosters, [row], merges_on=False).rule3.final, {joined: ("exact", "x")})
+        self.assert_stops("no flag", rows_of=rows_of, rosters=rosters, decisions=[row])
+
+    def test_d_synthetic_link_to_a_player_of_the_other_club_stops(self):
+        # synthetic: 0 real rows. The 4 real other-club groups are different players with one name, so none needs this route.
+        joined, unjoined, _, rosters = unjoined_case()
+        other_club = {**rosters, ("m2", "B"): hand_roster(("o", "Otro"))}
+        rows = [decision("partial_join", "ESP|2021|1", "link_to", "o"), decision("cross_season_ids", "1", "approve")]
+        self.assert_stops("no FBref row in match m2 for A", rows_of={joined: 19, unjoined: 1}, rosters=other_club, decisions=rows)
+
+    def test_d_synthetic_partial_join_link_to_with_no_rows_left_stops_as_stale(self):
+        # synthetic: 0 real rows. Both unjoined groups are rejected, so the row would do nothing.
+        _, _, rows_of, rosters, first_key, second_key = stopped_case()
+        rows = [decision("name_map", first_key, "reject"), decision("name_map", second_key, "reject"), decision("partial_join", "ESP|2021|1", "link_to", "z")]
+        self.assert_stops("stale", "ESP|2021|1", rows_of=rows_of, rosters=rosters, decisions=rows)
+
+    def test_d_synthetic_guard_list_prints_the_rows_of_an_anchor_pair(self):
+        # synthetic: Gabriel's real anchor link, 1 row beside 15 name map rows, with its verdict forced to `none`, because all 14 real anchor player-seasons agree.
+        real_finish = join.finish_join
+        forced = []
+
+        def with_forced_verdict(*run):
+            result = real_finish(*run)
+            pair = sorted(result.rule3.anchor_rows)[0]
+            forced.append((pair, result.rule3.name_map_rows[pair] + result.rule3.anchor_rows[pair]))
+            return result._replace(rule3=result.rule3._replace(anchor_guard={**result.rule3.anchor_guard, pair: ("none", None, 900)}))
+
+        printed = io.StringIO()
+        with mock.patch.object(script, "finish_join", with_forced_verdict), mock.patch.object(script, "season_rows_by_name", lambda clubs: join.season_rows_by_name(clubs, SAMPLE)), mock.patch.object(script, "read_review_decisions", lambda: []), mock.patch.object(script, "pool_candidates", lambda found: join.pool_candidates(found, SAMPLE)), contextlib.redirect_stdout(printed):
+            script.measure(sample_merged(), sample_shots(), sample_clubs(), [], merges_on=False)
+        pair, rows = forced[0]
+        line = next(line for line in printed.getvalue().splitlines() if line.startswith("  minutes_check = none:") and f" id {pair.understat_id} " in line and pair.fbref_id in line)
+        self.assertTrue(line.endswith(f", {rows} rows"), line)
+        self.assertGreater(rows, 0)
+
+    def test_d_synthetic_cardona_approve_message_points_to_reject(self):
+        # synthetic: hand-made row on Marc Cardona. His id has no row in match b5b5ee07, so `link_to` stops and `reject` is his route.
+        with self.assertRaises(SystemExit) as stop:
+            sample_finish([decision("partial_join", "ESP|2023|5159", "approve")])
+        self.assertIn("Use reject", str(stop.exception))
+        self.assertNotIn("Use link_to", str(stop.exception))
+        result = sample_finish([decision("partial_join", "ESP|2023|5159", "reject")])
+        self.assertIn(("ESP", 2023, 5159), result.unjoined_listed)
 
 
 class MovedFromTheOldTestFile(unittest.TestCase):
