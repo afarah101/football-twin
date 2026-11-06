@@ -1,8 +1,9 @@
 """TwinMatches: each Pool PlayerSeason's closest PlayerSeasons by every Candidate method and the Basketball method (#9).
 
 Twins can cross leagues, so each PlayerSeason gets two lists: all leagues and same league (plan step 7). A player's own
-seasons never appear (plan step 4). Closeness is "closer than X% of all pairs", against every pair of two different
-players in the Pool for that method (plan step 5).
+seasons never appear (plan step 4), and each other player fills one slot, with his closest season (Ahmed, 6 Nov 2026).
+Closeness is "closer than X% of all pairs" (plan step 5): on the all-leagues list against every pair of two different
+players in the Pool for that method, and on the same-league list against those pairs inside that league only (Ahmed, 6 Nov 2026).
 """
 from collections import defaultdict
 from dataclasses import dataclass
@@ -21,7 +22,7 @@ DISTANCE_DECIMALS = 9  # equal distances summed in a different order still tie, 
 class TwinMatch:
     player_season: object  # the PlayerSeason returned as a twin
     distance: float
-    closeness: float  # percent of all pairs of two different players that are farther apart
+    closeness: float  # percent of the list's reference pairs of two different players that are farther apart
 
 
 @dataclass(frozen=True)
@@ -64,6 +65,18 @@ def method_vectors(members):
     return {**{method: z for method in CANDIDATE_METHODS}, "basketball": basketball}
 
 
+def one_slot_each(order, ids):
+    """The first, so closest, season of each player in `order`, up to TOP players."""
+    _, first = np.unique(ids[order], return_index=True)
+    return order[np.sort(first)][:TOP]
+
+
+def twin_matches(members, row_distances, chosen, reference):
+    """TwinMatches for the rows `chosen`, with closeness against the sorted `reference` pair distances."""
+    closeness = 100 * (len(reference) - np.searchsorted(reference, row_distances[chosen], side="right")) / max(len(reference), 1)
+    return tuple(TwinMatch(members[other].player_season, float(row_distances[other]), float(share)) for other, share in zip(chosen, closeness))
+
+
 def twin_lists(peer_groups):
     """{(league, season): [MetricProfile]} to {method: {PlayerSeason key: TwinLists}}. Ties go to the smaller key."""
     members = sorted((member for group in peer_groups.values() for member in group), key=lambda member: member.player_season.key)
@@ -71,20 +84,21 @@ def twin_lists(peer_groups):
     leagues = np.array([member.player_season.league for member in members])
     other_player = ids[:, None] != ids[None, :]
     pairs = np.triu(other_player, k=1)
+    league_pairs = {league: pairs & (leagues[:, None] == league) & (leagues[None, :] == league) for league in sorted(set(leagues))}
     positions = np.arange(len(members))
     found = {}
     for method, vectors in method_vectors(members).items():
         distances = np.round(distance_matrix(vectors, method), DISTANCE_DECIMALS)
         reference = np.sort(distances[pairs])
-
-        def matches(row, chosen):
-            closeness = 100 * (len(reference) - np.searchsorted(reference, distances[row, chosen], side="right")) / max(len(reference), 1)
-            return tuple(TwinMatch(members[other].player_season, float(distances[row, other]), float(share)) for other, share in zip(chosen, closeness))
-
+        league_reference = {league: np.sort(distances[mask]) for league, mask in league_pairs.items()}
         lists = {}
         for row, member in enumerate(members):
             order = np.lexsort((positions, distances[row]))
             order = order[other_player[row, order]]
-            lists[member.player_season.key] = TwinLists(matches(row, order[:TOP]), matches(row, order[leagues[order] == leagues[row]][:TOP]))
+            same = order[leagues[order] == leagues[row]]  # filter the league first, so a player's closest season in this league is kept
+            lists[member.player_season.key] = TwinLists(
+                twin_matches(members, distances[row], one_slot_each(order, ids), reference),
+                twin_matches(members, distances[row], one_slot_each(same, ids), league_reference[leagues[row]]),
+            )
         found[method] = lists
     return found

@@ -2,7 +2,8 @@
 
 The sample's Pool is 30 real PlayerSeasons in 9 PeerGroups. Mohamed Salah holds two of them (ENG 2017/18 and 2022/23),
 which is the real own-seasons case. ENG 2020/21 and FRA 2018/19 hold one player each, so every z-score there is 0: the
-real zero-vector case for cosine and Pearson. Distances are checked against a plain-Python version written here.
+real zero-vector case for cosine and Pearson, and Salah is also the real case of one player near another twice. Distances,
+the one slot per player and both closeness reference sets are checked against a plain-Python version written here.
 Run from the repo root: python3 -m unittest discover tests
 """
 import math
@@ -58,16 +59,27 @@ def plain_vectors(method):
     return vectors
 
 
-def plain_list(method, key, same_league):
+def plain_ranked(method, key, same_league):
+    """Every other player's season, closest first, before the one-slot rule."""
     vectors = plain_vectors(method)
     others = [other for other in vectors if other[2] != key[2] and (not same_league or other[0] == key[0])]
-    ranked = sorted(others, key=lambda other: (round(plain_distance(method, vectors[key], vectors[other]), twins.DISTANCE_DECIMALS), other))
-    return [(other, plain_distance(method, vectors[key], vectors[other])) for other in ranked[:twins.TOP]]
+    return sorted(others, key=lambda other: (round(plain_distance(method, vectors[key], vectors[other]), twins.DISTANCE_DECIMALS), other))
 
 
-def plain_closeness(method, distance):
+def plain_list(method, key, same_league):
+    """Owner decision 1: each player once, with his closest season, up to TOP players."""
+    vectors, kept, seen = plain_vectors(method), [], set()
+    for other in plain_ranked(method, key, same_league):
+        if other[2] not in seen:
+            seen.add(other[2])
+            kept.append((other, plain_distance(method, vectors[key], vectors[other])))
+    return kept[:twins.TOP]
+
+
+def plain_closeness(method, distance, league=None):
+    """All pairs of two different players, or with `league` only pairs of two players in that league (owner decision 2)."""
     vectors = plain_vectors(method)
-    keys = sorted(vectors)
+    keys = sorted(key for key in vectors if league is None or key[0] == league)
     pairs = [round(plain_distance(method, vectors[a], vectors[b]), twins.DISTANCE_DECIMALS) for i, a in enumerate(keys) for b in keys[i + 1:] if a[2] != b[2]]
     return 100 * sum(1 for found in pairs if found > distance) / len(pairs)
 
@@ -137,6 +149,39 @@ class TwinLists(unittest.TestCase):
                 crossed |= any(found["league"] != key[0] for found in entry["twins"][method]["all_leagues"])
         self.assertTrue(crossed)
         self.assertEqual(entries()[("FRA", 2018, next(key[2] for key in entries() if key[:2] == ("FRA", 2018)))]["twins"]["euclidean"]["same_league"], [])  # real: the only French Pool player
+
+    def test_each_list_holds_a_player_once_with_his_closest_season(self):
+        vectors = {method: plain_vectors(method) for method in twins.CANDIDATE_METHODS + twins.COMPARISON_METHODS}
+        # Real: before the one-slot rule, Salah's two Pool seasons both reach some top 10.
+        self.assertTrue(any(sum(1 for other in plain_ranked(method, key, same_league)[:twins.TOP] if other[2] == SALAH) == 2
+                            for method in twins.CANDIDATE_METHODS for key in entries() for same_league in (False, True)))
+        written = {(method, key, same_league): [(found["league"], found["season"], found["player_id"]) for found in entry["twins"][method]["same_league" if same_league else "all_leagues"]]
+                   for key, entry in entries().items() for method in twins.CANDIDATE_METHODS for same_league in (False, True)}
+        domain = {(method, key, same_league): [match.player_season.key for match in (found.same_league if same_league else found.all_leagues)]
+                  for method, lists in domain_lists().items() for key, found in lists.items() for same_league in (False, True)}
+        self.assertTrue(set(domain) > set(written))
+        for (method, key, same_league), listed in [*written.items(), *domain.items()]:
+            players = [other[2] for other in listed]
+            self.assertEqual(len(players), len(set(players)), (method, key, same_league))
+            eligible = {other[2] for other in plain_ranked(method, key, same_league)}
+            self.assertEqual(len(players), min(twins.TOP, len(eligible)), (method, key, same_league))
+            for other in listed:
+                seasons = [found for found in vectors[method] if found[2] == other[2] and (not same_league or found[0] == key[0])]
+                closest = min(seasons, key=lambda found: (round(plain_distance(method, vectors[method][key], vectors[method][found]), twins.DISTANCE_DECIMALS), found))
+                self.assertEqual(other, closest, (method, key, same_league))
+
+    def test_same_league_closeness_uses_same_league_pairs_only(self):
+        checked = 0
+        for key, entry in entries().items():
+            for method in twins.CANDIDATE_METHODS:
+                for found in entry["twins"][method]["same_league"]:
+                    self.assertAlmostEqual(found["closeness"], plain_closeness(method, found["distance"], league=key[0]), places=9, msg=(key, method))
+                    checked += 1
+        self.assertTrue(checked)
+        # The all-leagues list keeps all pairs as its reference, so the two differ for a real same-league twin.
+        first = entries()[("ENG", 2017, SALAH)]["twins"]["euclidean"]
+        same = first["same_league"][0]
+        self.assertNotAlmostEqual(plain_closeness("euclidean", same["distance"], league="ENG"), plain_closeness("euclidean", same["distance"]), places=6)
 
     def test_a_peer_group_of_one_has_all_zero_z_scores_and_finite_distances(self):
         alone = [key for key in entries() if key[:2] in (("ENG", 2020), ("FRA", 2018))]

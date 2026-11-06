@@ -160,9 +160,9 @@ class ZScores(unittest.TestCase):
             self.assertTrue(all(-3 <= value <= 3 for value in values), metric)
             if all(abs(value) < 3 for value in values):
                 self.assertAlmostEqual(sum(values), 0, places=9, msg=metric)
-        # Another league-season's players never move this PeerGroup's z-scores.
+        # Another league-season's players never move this PeerGroup's entries. Only the twin lists span the whole Pool.
         alone = dataclasses.replace(loaded(), player_seasons=tuple(found for found in loaded().player_seasons if (found.league, found.season) == PEER_GROUP))
-        profiles_of = lambda found: {entry["player_id"]: entry["metric_profile"] for entry in found["player_seasons"]}
+        profiles_of = lambda found: {entry["player_id"]: {name: value for name, value in entry.items() if name != "twins"} for entry in found["player_seasons"]}
         self.assertEqual(profiles_of(built_files(alone)[f"private/{PEER_GROUP[0]}_{PEER_GROUP[1]}.json"]), profiles_of(content))
 
     def test_synthetic_z_scores_clip_at_3(self):
