@@ -1,0 +1,169 @@
+league,understat_club,fbref_club,exact_name,linked_matches
+ENG,Arsenal,Arsenal,True,294
+ENG,Aston Villa,Aston Villa,True,218
+ENG,Bournemouth,Bournemouth,True,218
+ENG,Brentford,Brentford,True,142
+ENG,Brighton,Brighton & Hove Albion,False,293
+ENG,Burnley,Burnley,True,231
+ENG,Cardiff,Cardiff City,False,38
+ENG,Chelsea,Chelsea,True,294
+ENG,Crystal Palace,Crystal Palace,True,294
+ENG,Everton,Everton,True,293
+ENG,Fulham,Fulham,True,178
+ENG,Huddersfield,Huddersfield Town,False,76
+ENG,Hull,,False,0
+ENG,Ipswich,Ipswich Town,False,24
+ENG,Leeds,Leeds United,False,118
+ENG,Leicester,Leicester City,False,252
+ENG,Liverpool,Liverpool,True,293
+ENG,Luton,Luton Town,False,38
+ENG,Manchester City,Manchester City,True,293
+ENG,Manchester United,Manchester United,True,294
+ENG,Middlesbrough,,False,0
+ENG,Newcastle United,Newcastle United,True,294
+ENG,Norwich,Norwich City,False,76
+ENG,Nottingham Forest,Nottingham Forest,True,104
+ENG,Queens Park Rangers,,False,0
+ENG,Sheffield United,Sheffield United,True,114
+ENG,Southampton,Southampton,True,252
+ENG,Stoke,Stoke City,False,38
+ENG,Sunderland,Sunderland,True,4
+ENG,Swansea,Swansea City,False,38
+ENG,Tottenham,Tottenham Hotspur,False,294
+ENG,Watford,Watford,True,152
+ENG,West Bromwich Albion,West Bromwich Albion,True,76
+ENG,West Ham,West Ham United,False,294
+ENG,Wolverhampton Wanderers,Wolverhampton Wanderers,True,255
+ESP,Alaves,Alavés,False,254
+ESP,Almeria,Almería,False,76
+ESP,Athletic Club,Athletic Club,True,291
+ESP,Atletico Madrid,Atlético Madrid,False,291
+ESP,Barcelona,Barcelona,True,291
+ESP,Cadiz,Cádiz,False,152
+ESP,Celta Vigo,Celta Vigo,True,292
+ESP,Cordoba,,False,0
+ESP,Deportivo La Coruna,Deportivo La Coruña,False,38
+ESP,Eibar,Eibar,True,151
+ESP,Elche,Elche,True,118
+ESP,Espanyol,Espanyol,True,215
+ESP,Getafe,Getafe,True,292
+ESP,Girona,Girona,True,178
+ESP,Granada,Granada,True,151
+ESP,Las Palmas,Las Palmas,True,98
+ESP,Leganes,Leganés,False,135
+ESP,Levante,Levante,True,194
+ESP,Malaga,Málaga,False,38
+ESP,Mallorca,Mallorca,True,178
+ESP,Osasuna,Osasuna,True,216
+ESP,Rayo Vallecano,Rayo Vallecano,True,178
+ESP,Real Betis,Real Betis,True,293
+ESP,Real Madrid,Real Madrid,True,292
+ESP,Real Oviedo,Oviedo,False,4
+ESP,Real Sociedad,Real Sociedad,True,292
+ESP,Real Valladolid,Valladolid,False,174
+ESP,SD Huesca,Huesca,False,76
+ESP,Sevilla,Sevilla,True,291
+ESP,Sporting Gijon,,False,0
+ESP,Valencia,Valencia,True,291
+ESP,Villarreal,Villarreal,True,292
+FRA,Ajaccio,Ajaccio,True,38
+FRA,Amiens,Amiens,True,104
+FRA,Angers,Angers,True,242
+FRA,Auxerre,Auxerre,True,62
+FRA,Bordeaux,Bordeaux,True,180
+FRA,Brest,Brest,True,199
+FRA,Caen,Caen,True,75
+FRA,Clermont Foot,Clermont Foot,True,110
+FRA,Dijon,Dijon,True,142
+FRA,Evian Thonon Gaillard,,False,0
+FRA,GFC Ajaccio,,False,0
+FRA,Guingamp,Guingamp,True,75
+FRA,Le Havre,Le Havre,True,58
+FRA,Lens,Lens,True,171
+FRA,Lille,Lille,True,275
+FRA,Lorient,Lorient,True,152
+FRA,Lyon,Lyon,True,274
+FRA,Marseille,Marseille,True,274
+FRA,Metz,Metz,True,180
+FRA,Monaco,Monaco,True,276
+FRA,Montpellier,Montpellier,True,272
+FRA,Nancy,,False,0
+FRA,Nantes,Nantes,True,276
+FRA,Nice,Nice,True,275
+FRA,Nimes,Nîmes,False,104
+FRA,Paris FC,Paris FC,True,4
+FRA,Paris Saint Germain,Paris Saint-Germain,False,275
+FRA,Reims,Reims,True,234
+FRA,Rennes,Rennes,True,276
+FRA,SC Bastia,,False,0
+FRA,Saint-Etienne,Saint-Étienne,False,200
+FRA,Strasbourg,Strasbourg,True,274
+FRA,Toulouse,Toulouse,True,199
+FRA,Troyes,Troyes,True,114
+GER,Arminia Bielefeld,Arminia,False,68
+GER,Augsburg,Augsburg,True,261
+GER,Bayer Leverkusen,Bayer Leverkusen,True,261
+GER,Bayern Munich,Bayern Munich,True,261
+GER,Bochum,Bochum,True,121
+GER,Borussia Dortmund,Dortmund,False,261
+GER,Borussia M.Gladbach,Mönchengladbach,False,260
+GER,Darmstadt,Darmstadt 98,False,34
+GER,Eintracht Frankfurt,Eintracht Frankfurt,True,261
+GER,FC Cologne,Köln,False,207
+GER,FC Heidenheim,Heidenheim,False,57
+GER,Fortuna Duesseldorf,Düsseldorf,False,68
+GER,Freiburg,Freiburg,True,261
+GER,Greuther Fuerth,Greuther Fürth,False,34
+GER,Hamburger SV,Hamburger SV,True,37
+GER,Hannover 96,Hannover 96,True,68
+GER,Hertha Berlin,Hertha BSC,False,204
+GER,Hoffenheim,Hoffenheim,True,261
+GER,Holstein Kiel,Holstein Kiel,True,19
+GER,Ingolstadt,,False,0
+GER,Mainz 05,Mainz 05,True,261
+GER,Nuernberg,Nürnberg,False,34
+GER,Paderborn,Paderborn 07,False,34
+GER,RasenBallsport Leipzig,RB Leipzig,False,261
+GER,Schalke 04,Schalke 04,True,170
+GER,St. Pauli,St. Pauli,True,22
+GER,Union Berlin,Union Berlin,True,193
+GER,VfB Stuttgart,Stuttgart,False,227
+GER,Werder Bremen,Werder Bremen,True,227
+GER,Wolfsburg,Wolfsburg,True,261
+ITA,AC Milan,Milan,False,291
+ITA,Atalanta,Atalanta,True,290
+ITA,Benevento,Benevento,True,76
+ITA,Bologna,Bologna,True,291
+ITA,Brescia,Brescia,True,38
+ITA,Cagliari,Cagliari,True,253
+ITA,Carpi,,False,0
+ITA,Cesena,,False,0
+ITA,Chievo,Chievo,True,75
+ITA,Como,Como,True,26
+ITA,Cremonese,Cremonese,True,41
+ITA,Crotone,Crotone,True,76
+ITA,Empoli,Empoli,True,175
+ITA,Fiorentina,Fiorentina,True,289
+ITA,Frosinone,Frosinone,True,76
+ITA,Genoa,Genoa,True,254
+ITA,Inter,Internazionale,False,291
+ITA,Juventus,Juventus,True,291
+ITA,Lazio,Lazio,True,292
+ITA,Lecce,Lecce,True,140
+ITA,Monza,Monza,True,99
+ITA,Napoli,Napoli,True,292
+ITA,Palermo,,False,0
+ITA,Parma,Parma,True,0
+ITA,Parma Calcio 1913,Parma,False,140
+ITA,Pescara,,False,0
+ITA,Pisa,Pisa,True,3
+ITA,Roma,Roma,True,290
+ITA,SPAL 2013,SPAL,False,114
+ITA,Salernitana,Salernitana,True,114
+ITA,Sampdoria,Sampdoria,True,228
+ITA,Sassuolo,Sassuolo,True,268
+ITA,Spezia,Spezia,True,114
+ITA,Torino,Torino,True,292
+ITA,Udinese,Udinese,True,291
+ITA,Venezia,Venezia,True,61
+ITA,Verona,Hellas Verona,False,253
