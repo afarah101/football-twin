@@ -26,7 +26,7 @@ sys.path.insert(0, str(ROOT))
 from twin.domain.pool import in_pool, is_pool_candidate
 from twin.infrastructure.standin.loader import build_records
 from twin.infrastructure.standin.player_join import (
-    MAX_SHOT_GAP, MIN_ANCHOR_MATCHES, anchor_listing, build_rosters, check_sample_pairs, compared_name, finish_join, guard_facts, guard_review_list, join_counts, link_keys, link_matches, load_positions,
+    HASHED_FILES, MAX_SHOT_GAP, MIN_ANCHOR_MATCHES, StandinFiles, anchor_listing, build_rosters, check_sample_pairs, compared_name, finish_join, guard_facts, guard_review_list, join_counts, link_keys, link_matches, load_positions,
     load_shots, merge_fbref_ids, minutes_limit, name_map_file_rows, partial_joins, pool_candidates, positions_for_join, read_review_decisions, rule3_links, season_rows_by_name, shot_groups,
     understat_to_fbref_clubs,
 )
@@ -302,6 +302,9 @@ def measure(positions, shots, clubs, refused, merges_on):
 
 
 def main():
+    for name in HASHED_FILES:
+        StandinFiles().check_hash(name)  # stops the run on the first file that differs
+    print(f"Hash check: {len(HASHED_FILES)} files, 0 differ")
     unmerged = positions_for_join(merges=False)
     shots = load_shots()
     clubs = understat_to_fbref_clubs()
