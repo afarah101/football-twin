@@ -3,339 +3,46 @@
 Usage: python3 scripts/measure_rule3.py
 
 Prints the join table, the minutes guard results, the season anchors, the partial joins and the id collisions, with the
-checks behind them. Writes a fixed
-random sample of the name map to docs/reports/name_map_sample.csv. Reads data/standin only, makes no network calls, and
-the same files give identical output. Of review_decisions.csv it applies only `approve` on a link, at the guard, and only
-that row stops on a stale key. It prints any other row as not applied. read_review_decisions adds two stops, on an unknown
-value and on two rows with one key. All the plan's other stops are #6 work.
-Exits non-zero if a check at the end fails. Measured before any FBref id merges, because #6 owns those. The plan runs the
-guard after them.
+checks behind them. Writes data/standin/name_map.csv, and a fixed random sample of it to docs/reports/name_map_sample.csv.
+Reads data/standin only, makes no network calls, and the same files give identical output. All the join logic is in
+twin/infrastructure/standin/player_join.py, so one version exists. It runs twice, with the FBref id merges off and then on,
+and prints one `Merges` line for each. Every other section, and the files, come from the merges-on run only.
+Exits non-zero if a check at the end fails.
 """
+import contextlib
 import csv
 import html
+import io
 import random
-import re
-import unicodedata
+import subprocess
+import sys
 from collections import Counter, defaultdict
-from datetime import date
 from pathlib import Path
-from typing import NamedTuple
 
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+from twin.infrastructure.standin.player_join import (
+    MIN_ANCHOR_MATCHES, anchor_listing, build_rosters, check_sample_pairs, compared_name, finish_join, guard_facts, guard_review_list, join_counts, link_keys, link_matches, load_positions,
+    load_shots, merge_fbref_ids, minutes_limit, name_map_file_rows, partial_joins, pool_candidates, positions_for_join, read_review_decisions, rule3_links, season_rows_by_name, shot_groups,
+    understat_to_fbref_clubs,
+)
+
 DATA = ROOT / "data" / "standin"
 SAMPLE_FILE = ROOT / "docs" / "reports" / "name_map_sample.csv"
 SAMPLE_SEED = 20261104
 SAMPLE_SIZE = 50
-
-SHOT_FILE_OF_LEAGUE = {"ENG": "epl", "ESP": "la_liga", "FRA": "ligue_1", "GER": "bundesliga", "ITA": "serie_a"}
-POOL_FIRST_SEASON, POOL_LAST_SEASON = 2017, 2023
-MAX_LINK_GAP_DAYS = 14
-FOLDED_LETTERS = str.maketrans({"ø": "o", "ð": "d", "đ": "dj", "ı": "i", "ł": "l", "ß": "ss", "æ": "ae", "œ": "oe", "þ": "th"})
-ATTACKING_POS = {"FW", "LW", "RW", "AM"}
-DECISIONS_FILE = DATA / "review_decisions.csv"
-LINK_ITEM_TYPES = {"name_map", "season_anchor"}
-ITEM_TYPES = LINK_ITEM_TYPES | {"partial_join", "pool_candidate"}
-DECISIONS = {"approve", "reject", "link_to", "merge_ids"}
+NAME_MAP_FILE = DATA / "name_map.csv"
+FILE_COLUMNS = ["league", "understat_season", "understat_id", "shot_name", "fbref_id", "fbref_name", "shot_rows", "matches", "understat_minutes", "fbref_minutes", "minutes_check"]
 # League, Understat season and player_id of the cases the plan asks about, and the former collisions.
 NAMED_CASES = (
     ("ESP", 2018, 5114), ("ESP", 2019, 2302), ("FRA", 2022, 11016), ("FRA", 2022, 11249),
     ("ESP", 2021, 2098), ("ESP", 2021, 8978), ("ESP", 2023, 2400), ("ESP", 2023, 8042), ("ITA", 2019, 1140), ("ITA", 2019, 2244),
 )
 MIN_JOINED_ROWS = 315_073
-# With the current review_decisions.csv, before #6's FBref id merges, which give 3,109 of 3,137. A new `approve` can move them.
-EXPECTED_POOL, EXPECTED_CANDIDATES = 3_108, 3_136
-MIN_ANCHOR_MATCHES = 2
-FULL_JOIN_PERCENT = 95
-
-
-class ShotGroup(NamedTuple):
-    """One player's shots in one match, as Understat names them. The club comes from h_a and the linked match."""
-    league: str
-    season: int
-    match: str
-    understat_id: int
-    name: str
-    club: str
-
-    @property
-    def player_season_name(self):
-        return self.league, self.season, self.understat_id, self.name
-
-    @property
-    def player_season(self):
-        return self.league, self.season, self.understat_id
-
-
-class RosterPlayer(NamedTuple):
-    fbref_id: str
-    player: str
-    compared: str
-
-
-class PlayerSeasonName(NamedTuple):
-    league: str
-    season: int
-    understat_id: int
-    name: str
-    fbref_id: str
-
-
-def decision_key(pair):
-    """The key review_decisions.csv uses for a name_map or season_anchor link."""
-    return f"{pair.league}|{pair.season}|{pair.understat_id}|{html.unescape(pair.name)}|{pair.fbref_id}"
-
-
-def read_review_decisions():
-    """Every row of the review decisions file. Stops on an unknown item_type or decision, or on two rows with one key. The plan's `fbref_id` stops are #6 work."""
-    # utf-8-sig: spreadsheets save this hand-edited file with a byte order mark.
-    with DECISIONS_FILE.open(encoding="utf-8-sig", newline="") as handle:
-        decisions = list(csv.DictReader(handle))
-    for row in decisions:
-        if row["item_type"] not in ITEM_TYPES or row["decision"] not in DECISIONS:
-            raise SystemExit(f"{DECISIONS_FILE.name}: unknown item_type or decision: {row}")
-    repeated = sorted(key for key, count in Counter((row["item_type"], row["key"]) for row in decisions).items() if count > 1)
-    if repeated:
-        raise SystemExit(f"{DECISIONS_FILE.name}: two rows on one key: {repeated}")
-    return decisions
-
-
-def compared_name(name):
-    """Step 1: case, accents and punctuation removed, letters NFKD does not reduce folded, a hyphen counts as a space."""
-    decomposed = unicodedata.normalize("NFKD", html.unescape(name))
-    folded = "".join(c for c in decomposed if not unicodedata.combining(c)).casefold().translate(FOLDED_LETTERS)
-    return " ".join(re.sub(r"[^\w\s]", "", folded.replace("-", " ")).split())
-
-
-def minutes_limit(understat_minutes, fbref_minutes):
-    return max(90, 0.1 * max(understat_minutes, fbref_minutes))
-
-
-def is_name_map_candidate(shot_words, roster_words):
-    """Step 2: shares the last name, or one name holds the other as whole words, in any order."""
-    return roster_words[-1] == shot_words[-1] or set(shot_words) <= set(roster_words) or set(roster_words) <= set(shot_words)
-
-
-def load_positions():
-    frames = []
-    for league in SHOT_FILE_OF_LEAGUE:
-        columns = ["MatchURL", "Match_Date", "Matchweek", "Season_End_Year", "Home_Team", "Away_Team", "Team", "Player", "Player_Href", "Pos", "Min"]
-        frames.append(pd.read_parquet(DATA / f"{league}_M_1st_positions.parquet", columns=columns).assign(league=league))
-    rows = pd.concat(frames, ignore_index=True)
-    rows = rows[rows["Season_End_Year"].between(POOL_FIRST_SEASON + 1, POOL_LAST_SEASON + 1) & ~rows["Matchweek"].str.contains("tie-breaker")].copy()
-    rows["match"] = rows["MatchURL"].str.extract(r"/matches/([0-9a-f]{8})/", expand=False)
-    rows["fbref_id"] = rows["Player_Href"].str.extract(r"/players/([0-9a-f]{8})/", expand=False)
-    return rows
-
-
-def load_shots():
-    frames = []
-    for league, stem in SHOT_FILE_OF_LEAGUE.items():
-        columns = ["season", "match_id", "date", "player", "player_id", "home_team", "away_team", "h_a", "home_away", "result"]
-        frames.append(pd.read_parquet(DATA / f"{stem}_shot_data.parquet", columns=columns).assign(league=league))
-    rows = pd.concat(frames, ignore_index=True)
-    rows = rows[rows["season"].between(POOL_FIRST_SEASON, POOL_LAST_SEASON)].copy()
-    rows["season"] = rows["season"].astype(int)
-    rows["player_id"] = rows["player_id"].astype(int)
-    # Every row fills exactly one of the two columns: main prints the check.
-    rows["side"] = rows["h_a"].where(rows["h_a"].fillna("") != "", rows["home_away"])
-    if not set(rows["side"].fillna("")) <= {"h", "a"}:
-        raise SystemExit("a Pool shot row has no side, or an unknown one")
-    return rows
-
-
-def understat_to_fbref_clubs():
-    club_map = pd.read_csv(DATA / "club_map.csv", keep_default_na=False)
-    return {(row.league, row.understat_club): row.fbref_club for row in club_map.itertuples() if row.understat_club and row.fbref_club}
-
-
-def link_matches(shots, positions, clubs):
-    """Rule 2: same home club and same away club, in that order, same season, nearest FBref date, at most 14 days."""
-    fbref_matches = positions.drop_duplicates("match")
-    by_pair = defaultdict(list)
-    for row in fbref_matches.itertuples():
-        by_pair[(row.league, row.Season_End_Year, row.Home_Team, row.Away_Team)].append((date.fromisoformat(row.Match_Date[:10]), row.match))
-    links, gaps = {}, Counter()
-    understat_matches = shots.drop_duplicates(["league", "match_id"])
-    for row in understat_matches.itertuples():
-        pair = (row.league, row.season + 1, clubs.get((row.league, row.home_team)), clubs.get((row.league, row.away_team)))
-        day = date.fromisoformat(row.date[:10])
-        options = sorted((abs((match_day - day).days), match) for match_day, match in by_pair.get(pair, []))
-        if options and options[0][0] <= MAX_LINK_GAP_DAYS:
-            links[(row.league, row.match_id)] = options[0][1]
-            gaps[options[0][0]] += 1
-    return links, gaps, len(understat_matches)
-
-
-def shot_groups(shots, links, positions):
-    """Rows per ShotGroup, in linked matches only. Also returns each linked shot row's group."""
-    fbref_matches = positions.drop_duplicates("match").set_index("match")
-    home, away = fbref_matches["Home_Team"].to_dict(), fbref_matches["Away_Team"].to_dict()
-    rows, keys = Counter(), []
-    for league, season, match_id, name, understat_id, side in zip(shots["league"], shots["season"], shots["match_id"], shots["player"], shots["player_id"], shots["side"]):
-        match = links.get((league, match_id))
-        if match is None:
-            keys.append(None)
-            continue
-        group = ShotGroup(league, season, match, understat_id, name, home[match] if side == "h" else away[match])
-        rows[group] += 1
-        keys.append(group)
-    return rows, keys
-
-
-def build_rosters(positions):
-    rosters = defaultdict(list)
-    for match, club, fbref_id, player in zip(positions["match"], positions["Team"], positions["fbref_id"], positions["Player"]):
-        rosters[(match, club)].append(RosterPlayer(fbref_id, player, compared_name(player)))
-    return rosters
-
-
-def join_by_name(groups, rosters):
-    """Exact, then step 1. Two players matching inside one club and match decides nothing, so that group stays unjoined."""
-    joined = {}
-    for group in groups:
-        roster = rosters[(group.match, group.club)]
-        exact = [player for player in roster if player.player == html.unescape(group.name)]
-        same = [player for player in roster if player.compared == compared_name(group.name)]
-        if len(exact) == 1:
-            joined[group] = ("exact", exact[0].fbref_id)
-        elif not exact and len(same) == 1:
-            joined[group] = ("step 1", same[0].fbref_id)
-    return joined
-
-
-def name_map_links(groups, rosters, joined):
-    """Step 2, within the match and club only. Returns the links, the 2+ candidate groups and what each rule stopped."""
-    taken = {(group.match, joined[group][1]) for group in joined}
-    claims, undecided, stopped = defaultdict(list), {}, Counter()
-    for group in groups:
-        if group in joined:
-            continue
-        shot_words = compared_name(group.name).split()
-        options = [player for player in rosters[(group.match, group.club)] if (group.match, player.fbref_id) not in taken and player.compared and shot_words and is_name_map_candidate(shot_words, player.compared.split())]
-        if len(options) == 1:
-            claims[(group.match, options[0].fbref_id)].append(group)
-        elif options:
-            undecided[group] = {player.fbref_id for player in options}
-            stopped["2+ candidates"] += 1
-        else:
-            stopped["no candidate"] += 1
-    links = {}
-    for (_, fbref_id), claimants in claims.items():
-        if len(claimants) > 1:
-            stopped["two shot names on one roster player"] += len(claimants)
-        else:
-            links[claimants[0]] = fbref_id
-    ids_of_player_season = defaultdict(set)
-    for group, link in joined.items():
-        ids_of_player_season[group.player_season].add(link[1])
-    for group, fbref_id in links.items():
-        ids_of_player_season[group.player_season].add(fbref_id)
-    # Only step 2 links stop. Exact and step 1 links stay, and two ids with no step 2 link are left to the id merges.
-    conflicts = sorted({group.player_season for group in links if len(ids_of_player_season[group.player_season]) > 1})
-    stopped["player-seasons reaching 2+ FBref ids"] = len(conflicts)
-    return {group: fbref_id for group, fbref_id in links.items() if group.player_season not in conflicts}, undecided, stopped, conflicts
-
-
-def season_anchor_links(undecided, linked):
-    """Step 3: in a match with 2+ candidates, the one FBref id the same Understat id links to in 2+ other matches of that season and club.
-
-    Anchors come only from links that survived the guard, and one pass only, so an anchor link never anchors another.
-    Returns the links and what stopped the others.
-    """
-    matches_of_id = defaultdict(lambda: defaultdict(set))
-    for group, (_, fbref_id) in linked.items():
-        matches_of_id[(group.league, group.season, group.understat_id, group.club)][fbref_id].add(group.match)
-    taken = {(group.match, link[1]) for group, link in linked.items()}
-    claims, stopped = defaultdict(list), Counter()
-    for group, candidates in undecided.items():
-        ids = matches_of_id.get((group.league, group.season, group.understat_id, group.club), {})
-        if len(ids) != 1:
-            stopped["no links for that club" if not ids else "links to 2+ FBref ids"] += 1
-            continue
-        fbref_id, matches = next(iter(ids.items()))
-        if len(matches - {group.match}) < MIN_ANCHOR_MATCHES:
-            stopped[f"under {MIN_ANCHOR_MATCHES} other matches"] += 1
-        elif fbref_id not in candidates:
-            stopped["id not a candidate"] += 1
-        elif (group.match, fbref_id) in taken:
-            stopped["id already linked in that match"] += 1
-        else:
-            claims[(group.match, fbref_id)].append(group)
-    links = {}
-    for (_, fbref_id), claimants in claims.items():
-        if len(claimants) > 1:
-            stopped["two shot names on one roster player"] += len(claimants)
-        else:
-            links[claimants[0]] = fbref_id
-    return links, stopped
-
-
-def join_counts(rows_of, stage):
-    """Understat player-season to (rows joined at that stage, rows in linked matches)."""
-    joined, total = Counter(), Counter()
-    for group, rows in rows_of.items():
-        key = (group.league, group.season, group.understat_id)
-        total[key] += rows
-        joined[key] += rows if group in stage else 0
-    return {key: (joined[key], total[key]) for key in sorted(total)}
-
-
-def partial_joins(rows_of, final):
-    """Player-seasons with under FULL_JOIN_PERCENT of their linked shot rows joined."""
-    return {key: counts for key, counts in join_counts(rows_of, final).items() if counts[0] * 100 < counts[1] * FULL_JOIN_PERCENT}
-
-
-def season_minutes_by_name(clubs):
-    """Understat season minutes per league, season and name, with the FBref clubs of each row's team list."""
-    rows = pd.read_parquet(DATA / "understat_xg_data.parquet", columns=["player_name", "team", "league", "season", "minutes"])
-    index = defaultdict(list)
-    for league, season, name, team, minutes in zip(rows["league"], rows["season"], rows["player_name"], rows["team"], rows["minutes"]):
-        league = "ENG" if league == "EPL" else league
-        index[(league, int(season[:4]), html.unescape(name))].append(({clubs.get((league, part.strip())) for part in team.split(",")}, int(minutes)))
-    return index
-
-
-def minutes_guard(name_map_rows, understat_minutes, fbref_minutes, clubs_of_player, approved_keys):
-    """One verdict per name map player-season: agree, disagree, approved or none."""
-    results = {}
-    for pair in sorted(name_map_rows):
-        options = understat_minutes.get((pair.league, pair.season, html.unescape(pair.name)), [])
-        if len(options) > 1:
-            options = [option for option in options if option[0] & clubs_of_player[(pair.league, pair.season + 1, pair.fbref_id)]]
-        fbref = fbref_minutes.get((pair.league, pair.season + 1, pair.fbref_id), 0)
-        if not options:
-            results[pair] = ("none", None, fbref)
-            continue
-        understat = sum(option[1] for option in options)
-        within = abs(understat - fbref) <= minutes_limit(understat, fbref)
-        results[pair] = ("agree" if within else "approved" if decision_key(pair) in approved_keys else "disagree", understat, fbref)
-    return results
-
-
-def id_collisions(joined):
-    """Two Understat ids on one FBref id in a league-season."""
-    ids = defaultdict(set)
-    for group, (_, fbref_id) in joined.items():
-        ids[(group.league, group.season, fbref_id)].add(group.understat_id)
-    return {key: sorted(found) for key, found in sorted(ids.items()) if len(found) > 1}
-
-
-def pool_candidates(positions):
-    """PlayerSeasons at 900+ minutes with attacking minutes above other minutes, substitute appearances ignored."""
-    events = pd.concat([pd.read_parquet(DATA / f"{league}_M_1st_match_summary.parquet", columns=["MatchURL", "Team", "Event_Type", "Event_Players"]) for league in SHOT_FILE_OF_LEAGUE])
-    substitutes = events[events["Event_Type"] == "Substitute"].drop_duplicates(["MatchURL", "Team", "Event_Players"])
-    came_on = set(zip(substitutes["MatchURL"].str.extract(r"/matches/([0-9a-f]{8})/", expand=False), substitutes["Team"], substitutes["Event_Players"].str.split(" for ").str[0].str.strip()))
-    is_substitute = pd.Series([key in came_on for key in zip(positions["match"], positions["Team"], positions["Player"])], index=positions.index)
-    is_attacking = pd.Series([bool(set(pos.split(",")) & ATTACKING_POS) for pos in positions["Pos"]], index=positions.index)
-    keys = ["league", "Season_End_Year", "fbref_id"]
-    totals = pd.DataFrame({
-        "total": positions.groupby(keys)["Min"].sum(),
-        "attacking": positions[~is_substitute & is_attacking].groupby(keys)["Min"].sum(),
-        "other": positions[~is_substitute & ~is_attacking].groupby(keys)["Min"].sum(),
-    }).fillna(0)
-    return sorted(totals[(totals["total"] >= 900) & (totals["attacking"] > totals["other"])].index)
+# With the current review_decisions.csv, as (Pool, candidates). A new `approve` can move them.
+EXPECTED_MERGES_OFF, EXPECTED_MERGES_ON = (3_108, 3_136), (3_109, 3_137)
 
 
 def chance_of_passing_guard(guard, fbref_minutes, roster_of_club, clubs_of_player):
@@ -352,53 +59,31 @@ def chance_of_passing_guard(guard, fbref_minutes, roster_of_club, clubs_of_playe
     return passed, tried
 
 
-def write_sample(name_map_rows, guard, names, rows_of, matches_of):
-    pairs = random.Random(SAMPLE_SEED).sample(sorted(name_map_rows), SAMPLE_SIZE)
-    with SAMPLE_FILE.open("w", encoding="utf8", newline="") as handle:
+def write_rows(path, rows):
+    with path.open("w", encoding="utf8", newline="") as handle:
         writer = csv.writer(handle, lineterminator="\n")
-        writer.writerow(["league", "understat_season", "understat_id", "shot_name", "fbref_id", "fbref_name", "shot_rows", "matches", "understat_minutes", "fbref_minutes", "minutes_check"])
-        for pair in sorted(pairs):
-            check, understat, fbref = guard[pair]
-            writer.writerow([pair.league, pair.season, pair.understat_id, html.unescape(pair.name), pair.fbref_id, names[pair.fbref_id], rows_of[pair], matches_of[pair], "" if understat is None else understat, fbref, check])
-    return len(pairs)
+        writer.writerows([FILE_COLUMNS, *rows])
 
 
-def self_check():
-    assert compared_name("Kylian Mbappe-Lottin") == "kylian mbappe lottin"
-    assert compared_name("Martin Ødegaard") == compared_name("Martin Odegaard")
-    assert compared_name("N&#039;Golo Kanté") == "ngolo kante"
-    assert is_name_map_candidate(["bruno"], ["bruno", "fernandes"])
-    assert is_name_map_candidate(["kylian", "mbappe", "lottin"], ["kylian", "mbappe"])
-    assert not is_name_map_candidate(["bruno"], ["brunos", "fernandes"])
-    # 0 real rows reach this direction out of order, so only an assert can hold it.
-    assert is_name_map_candidate(["fernandes", "bruno"], ["bruno", "miguel", "fernandes"])
-    assert abs(minutes_limit(839, 933) - 93.3) < 1e-9 and minutes_limit(49, 167) == 90
-    assert decision_key(PlayerSeasonName("ESP", 2023, 10095, "N&#039;Golo", "bed68338")) == "ESP|2023|10095|N'Golo|bed68338"
-    shot = lambda match, understat_id=1, club="A": ShotGroup("ESP", 2021, match, understat_id, "Kike", club)
-    two_other = {shot("m1"): ("map", "x"), shot("m2"): ("map", "x")}
-    assert season_anchor_links({shot("m3"): {"x", "y"}}, two_other)[0] == {shot("m3"): "x"}
-    assert season_anchor_links({shot("m3"): {"x", "y"}}, {shot("m1"): ("map", "x")})[0] == {}
-    assert season_anchor_links({shot("m3"): {"y", "z"}}, two_other)[0] == {}
-    assert season_anchor_links({shot("m3", club="B"): {"x", "y"}}, two_other)[0] == {}
-    assert season_anchor_links({shot("m3"): {"x", "y"}}, {**two_other, shot("m4"): ("map", "z")})[0] == {}
-    assert season_anchor_links({shot("m3"): {"x", "y"}, shot("m3", 2): {"x", "y"}}, {**two_other, shot("m1", 2): ("map", "x"), shot("m2", 2): ("map", "x")})[0] == {}
-    assert list(partial_joins({shot("m1"): 19, shot("m2"): 1}, {shot("m1")})) == []
-    assert list(partial_joins({shot("m1"): 18, shot("m2"): 2}, {shot("m1")})) == [("ESP", 2021, 1)]
-    spellings = [ShotGroup("GER", 2023, "m1", 1, "Sehrou Guirassy", "A"), ShotGroup("GER", 2023, "m2", 1, "Serhou Guirassy", "A")]
-    roster_with = lambda second_id: {("m1", "A"): [RosterPlayer("x", "S Guirassy", "s guirassy")], ("m2", "A"): [RosterPlayer(second_id, "S Guirassy", "s guirassy")]}
-    assert len(name_map_links(spellings, roster_with("x"), {})[0]) == 2
-    assert name_map_links(spellings, roster_with("y"), {})[0] == {}
-    assert name_map_links(spellings, roster_with("y"), {spellings[1]: ("exact", "y")})[0] == {}
-    assert len(name_map_links(spellings, roster_with("x"), {spellings[1]: ("exact", "x")})[0]) == 1
-    assert name_map_links(spellings, roster_with("y"), {spellings[0]: ("exact", "x"), spellings[1]: ("exact", "y")})[3] == []
+def committed_sample_text():
+    """The sample as committed, because each run rewrites the working copy."""
+    return subprocess.run(["git", "show", f"HEAD:{SAMPLE_FILE.relative_to(ROOT).as_posix()}"], cwd=ROOT, capture_output=True, text=True, encoding="utf8", check=True).stdout
 
 
-def main():
-    self_check()
-    positions = load_positions()
-    shots = load_shots()
-    clubs = understat_to_fbref_clubs()
-    links, gaps, understat_match_count = link_matches(shots, positions, clubs)
+def write_outputs(rule3, names):
+    """`name_map.csv`, and the fixed random sample of it. Returns the sample's size."""
+    rows = name_map_file_rows(rule3, names.get)
+    drawn = random.Random(SAMPLE_SEED).sample(rows, SAMPLE_SIZE)
+    check_sample_pairs({(row[0], row[1], row[2], row[4]) for row in drawn}, committed_sample_text())
+    write_rows(NAME_MAP_FILE, rows)
+    write_rows(SAMPLE_FILE, sorted(drawn))
+    return len(drawn)
+
+
+def measure(positions, shots, clubs, refused, merges_on):
+    """One whole run. Returns the joined rows, the Pool count, the candidates and the checks. Only the merges-on run writes files."""
+    date_links = link_matches(shots, positions, clubs)
+    links, gaps, understat_match_count = date_links.links, Counter(date_links.gap_days.values()), date_links.understat_matches
     both_filled = shots[(shots["h_a"].fillna("") != "") & (shots["home_away"].fillna("") != "")]
     print(f"Pool seasons: shot rows {len(shots)} | side values {dict(sorted(Counter(shots['side'].fillna('')).items()))} | h_a and home_away both filled {len(both_filled)}, disagreeing {int((both_filled['h_a'] != both_filled['home_away']).sum())}")
     print(f"Date link: Understat matches {understat_match_count} | linked {len(links)} | gap days to matches {dict(sorted(gaps.items()))}")
@@ -415,48 +100,28 @@ def main():
         clubs_of_player[(league, year, fbref_id)].add(club)
         roster_of_club[(league, year, club)].add(fbref_id)
 
-    joined = join_by_name(groups, rosters)
+    understat_minutes = season_rows_by_name(clubs)
+    decisions = read_review_decisions()
+    facts = guard_facts(positions, shots, understat_minutes)
+    before_decisions = rule3_links(rows_of, rosters, facts)
+    result = finish_join(before_decisions, rows_of, rosters, positions, decisions, refused, pool_candidates, facts, merges_on)
+    rule3 = result.rule3
+    joined, name_map, pair_of, name_map_rows, matches_of, guard, after_guard = rule3.joined, rule3.name_map, rule3.pair_of, rule3.name_map_rows, rule3.matches_of, rule3.guard, rule3.after_guard
+    anchors, anchor_pair_of, anchor_rows, anchor_matches, anchor_guard = rule3.anchors, rule3.anchor_pair_of, rule3.anchor_rows, rule3.anchor_matches, rule3.anchor_guard
+    after_anchor, after_anchor_guard, collisions, final = rule3.after_anchor, rule3.after_anchor_guard, result.collisions, rule3.final
     exact = {group: link for group, link in joined.items() if link[0] == "exact"}
     after_step_1 = dict(joined)
-    mapped, undecided, stopped, conflicts = name_map_links(groups, rosters, joined)
+    mapped, undecided, stopped, conflicts = name_map.links, name_map.undecided, name_map.stopped, name_map.conflicts
     after_step_2 = {**joined, **{group: ("map", fbref_id) for group, fbref_id in mapped.items()}}
-    pair_of = {group: PlayerSeasonName(group.league, group.season, group.understat_id, group.name, fbref_id) for group, fbref_id in mapped.items()}
-    name_map_rows, matches_of = Counter(), Counter()
-    for group, pair in pair_of.items():
-        name_map_rows[pair] += rows_of[group]
-        matches_of[pair] += 1
-    understat_minutes = season_minutes_by_name(clubs)
-    decisions = read_review_decisions()
-    approved_keys = {row["key"] for row in decisions if row["decision"] == "approve" and row["item_type"] in LINK_ITEM_TYPES}
-    guard = minutes_guard(name_map_rows, understat_minutes, fbref_minutes, clubs_of_player, approved_keys)
-    after_guard = {group: link for group, link in after_step_2.items() if link[0] != "map" or guard[pair_of[group]][0] != "disagree"}
-    anchored, anchor_stopped = season_anchor_links(undecided, after_guard)
-    anchor_pair_of = {group: PlayerSeasonName(group.league, group.season, group.understat_id, group.name, fbref_id) for group, fbref_id in anchored.items()}
-    anchor_rows, anchor_matches = Counter(), Counter()
-    for group, pair in anchor_pair_of.items():
-        anchor_rows[pair] += rows_of[group]
-        anchor_matches[pair] += 1
-    anchor_guard = minutes_guard(anchor_rows, understat_minutes, fbref_minutes, clubs_of_player, approved_keys)
-    keys_of_type = {"name_map": {decision_key(pair) for pair in guard}, "season_anchor": {decision_key(pair) for pair in anchor_guard}}
-    stale = [row for row in decisions if row["decision"] == "approve" and row["item_type"] in LINK_ITEM_TYPES and row["key"] not in keys_of_type[row["item_type"]]]
-    if stale:
-        raise SystemExit(f"{DECISIONS_FILE.name}: stale decisions, key not in the data: {stale}")
-    not_applied = [row for row in decisions if row["decision"] != "approve" or row["item_type"] not in LINK_ITEM_TYPES]
-    if not_applied:
-        print(f"Review decisions this script does not apply, so #6's numbers will differ: {not_applied}")
-    after_anchor = {**after_guard, **{group: ("season_anchor", fbref_id) for group, fbref_id in anchored.items()}}
-    after_anchor_guard = {group: link for group, link in after_anchor.items() if link[0] != "season_anchor" or anchor_guard[anchor_pair_of[group]][0] != "disagree"}
-    collisions = id_collisions(after_anchor_guard)
-    colliding = {(league, season, understat_id) for (league, season, _), ids in collisions.items() for understat_id in ids}
-    final = {group: link for group, link in after_anchor_guard.items() if (group.league, group.season, group.understat_id) not in colliding}
-    partial = partial_joins(rows_of, final)
+    anchored, anchor_stopped = anchors.links, anchors.stopped
+    partial = result.partial
 
     def count(stage):
         return sum(rows_of[group] for group in stage)
 
     print("\n### Join table")
     print(f"Pool shot rows in linked matches: {total}")
-    for label, stage in (("Exact", exact), ("After step 1", after_step_1), ("After step 2", after_step_2), ("After the minutes guard", after_guard), ("After season anchors", after_anchor), ("After the guard on anchors", after_anchor_guard), ("After id collisions", final)):
+    for label, stage in (("Exact", exact), ("After step 1", after_step_1), ("After step 2", after_step_2), ("After the minutes guard", after_guard), ("After season anchors", after_anchor), ("After the guard on anchors", after_anchor_guard), ("After id collisions", before_decisions.final), ("After the review decisions", final)):
         print(f"{label}: {count(stage)} ({100 * count(stage) / total:.2f}%)")
     print(f"Unjoined: {total - count(final)}")
     by_league = defaultdict(Counter)
@@ -466,19 +131,20 @@ def main():
             by_league[group.league][label] += rows_of[group] if group in stage else 0
     for league, counts in sorted(by_league.items()):
         print(f"{league}: " + " / ".join(f"{label} {100 * counts[label] / counts['all']:.2f}" for label in ("exact", "step 1", "step 2", "final")))
-    print(f"Stopped at step 2: {dict(sorted(stopped.items()))} | listed 2+ FBref ids: {conflicts}")
+    print(f"Stopped at step 2: {dict(sorted(stopped.items()))} | listed 2+ FBref ids: {conflicts} | stopped links: {link_keys(name_map.stopped_links)} | barred links: {link_keys(anchors.barred)} | two ids: {name_map.two_ids}")
 
     print("\n### Minutes guard")
     verdicts = Counter(result[0] for result in guard.values())
     print(f"Name map player-seasons {len(guard)}, rows {sum(name_map_rows.values())} | {dict(sorted(verdicts.items()))}")
-    kept_pairs = {pair: rows for pair, rows in name_map_rows.items() if guard[pair][0] != "disagree"}
+    kept_pairs = {pair: name_map_rows[pair] for pair in {pair_of[group] for group, link in final.items() if link[0] == "map"}}
     print(f"Keep their link: {len(kept_pairs)} player-seasons, {sum(kept_pairs.values())} rows")
-    for pair, (check, understat, fbref) in guard.items():
-        if check in ("disagree", "approved"):
-            print(f"  {check}: {pair.league} {pair.season} id {pair.understat_id} {html.unescape(pair.name)} to {names[pair.fbref_id]} {pair.fbref_id}: {understat} v {fbref}, gap {abs(understat - fbref)}, limit {minutes_limit(understat, fbref):.1f}, {name_map_rows[pair]} rows")
-    for pair, (check, _, fbref) in guard.items():
-        if check == "none":
-            print(f"  minutes_check = none: {pair.league} {pair.season} id {pair.understat_id} {html.unescape(pair.name)} to {names[pair.fbref_id]} {pair.fbref_id}: FBref {fbref}, {name_map_rows[pair]} rows")
+    review = guard_review_list(rule3)
+    for pair in [*review["disagree"], *review["approved"]]:
+        check, understat, fbref = guard.get(pair) or anchor_guard[pair]
+        print(f"  {check}: {pair.league} {pair.season} id {pair.understat_id} {html.unescape(pair.name)} to {names[pair.fbref_id]} {pair.fbref_id}: {understat} v {fbref}, gap {abs(understat - fbref)}, limit {minutes_limit(understat, fbref):.1f}, {name_map_rows[pair] + anchor_rows[pair]} rows")
+    for pair in review["none"]:
+        _, _, fbref = guard.get(pair) or anchor_guard[pair]
+        print(f"  minutes_check = none: {pair.league} {pair.season} id {pair.understat_id} {html.unescape(pair.name)} to {names[pair.fbref_id]} {pair.fbref_id}: FBref {fbref}, {name_map_rows[pair] + anchor_rows[pair]} rows")
     passed, tried = chance_of_passing_guard(guard, fbref_minutes, roster_of_club, clubs_of_player)
     print(f"Wrong same-club players who would pass the limit: {passed} of {tried} ({100 * passed / tried:.1f}%)")
 
@@ -488,7 +154,7 @@ def main():
     basis = defaultdict(set)
     for group, link in after_guard.items():
         basis[(group.league, group.season, group.understat_id, group.club)].add(link[0])
-    for pair, (check, understat, fbref) in anchor_guard.items():
+    for pair, (check, understat, fbref), _, _ in anchor_listing(rule3):
         anchor_clubs = {group.club for group, found in anchor_pair_of.items() if found == pair}
         anchor_basis = sorted({step for club in anchor_clubs for step in basis[(pair.league, pair.season, pair.understat_id, club)]})
         print(f"  {check}: {pair.league} {pair.season} id {pair.understat_id} {html.unescape(pair.name)} to {names[pair.fbref_id]} {pair.fbref_id}: {anchor_rows[pair]} rows in {anchor_matches[pair]} matches, minutes {understat} v {fbref}, anchored on {anchor_basis}, clubs {sorted(anchor_clubs)}")
@@ -510,7 +176,7 @@ def main():
     print(f"Anchor links whose club is not in the Understat season file's team list: {other_team}")
 
     print("\n### Partial joins")
-    pool = pool_candidates(positions)
+    pool = result.candidates
     pool_set = set(pool)
     partly_joined = {key: value for key, value in partial.items() if value[0] > 0}
     none_joined = {key: value for key, value in partial.items() if value[0] == 0}
@@ -557,8 +223,8 @@ def main():
             other_club_only.append((group.league, group.season, group.match, html.unescape(group.name), group.club, rows_of[group]))
     print(f"h_a club holds no such name but the other club does: {len(other_club_only)} groups, {sum(item[-1] for item in other_club_only)} rows: {other_club_only}")
     own_goal = Counter()
-    for group, result in zip(row_groups, shots["result"]):
-        if group is not None and result == "OwnGoal":
+    for group, shot_result in zip(row_groups, shots["result"]):
+        if group is not None and shot_result == "OwnGoal":
             own_goal["joined" if group in final else "unjoined"] += 1
     print(f"Own goal rows in linked matches: {dict(sorted(own_goal.items()))}")
 
@@ -590,22 +256,40 @@ def main():
     no_shots = sorted((key[0], key[1], names[key[2]]) for key in pool if key not in with_shots)
     print(f"\nPool candidates with shots: {len(pool) - len(no_shots)} of {len(pool)} ({100 * (len(pool) - len(no_shots)) / len(pool):.2f}%)")
     print(f"No joined shots, so partial_join = yes: {len(no_shots)}: {no_shots}")
-    pool_count = len(pool) - len(no_shots) - len(pool_partly_joined)
+    flags, pool_count = result.flags, result.pool_after
+    print(f"PlayerSeasons held by a flag: {len(flags)}, of them candidates {sum(key in pool_set for key in flags)}")
+    print(f"Pool before the decisions: {result.pool_before} | after: {result.pool_after} | joined before: {result.joined_before} | after: {result.joined_after}")
     print(f"Pool until Ahmed's review: {pool_count} of {len(pool)} candidates")
 
-    final_pairs = {pair_of[group] for group, link in final.items() if link[0] == "map"}
-    sampled = write_sample(final_pairs, guard, names, name_map_rows, matches_of)
-    print(f"\n### Sample\n{sampled} of {len(final_pairs)} name map pairs, seed {SAMPLE_SEED}, written to {SAMPLE_FILE.relative_to(ROOT)}")
+    sampled = SAMPLE_SIZE
+    if merges_on:
+        sampled = write_outputs(rule3, names)
+    print(f"Cross-season: {len(result.cross_season_cases)} Understat ids on 2+ FBref ids")
+    print(f"merge_ids rows: {result.merge_ids_rows} | merged collisions: {result.merged_collisions} | anchors gone with their evidence: {result.anchors_removed} | refused merges: {result.refused_merges} | combined and outside the Pool: {result.combined_outside_pool} | left unjoined by reject: {result.unjoined_listed}")
+    print(f"\n### Sample\n{sampled} of {len(name_map_file_rows(rule3, names.get))} name map pairs, seed {SAMPLE_SEED}, written to {SAMPLE_FILE.relative_to(ROOT)}")
 
-    print("\n### Checks")
-    checks = {
+    return count(final), pool_count, len(pool), {
         "no id collisions": not collisions,
         f"at least {MIN_JOINED_ROWS} rows joined": count(final) >= MIN_JOINED_ROWS,
-        f"Pool is {EXPECTED_POOL}": pool_count == EXPECTED_POOL,
-        f"candidates are {EXPECTED_CANDIDATES}": len(pool) == EXPECTED_CANDIDATES,
         "Ezzalzouli approved": any(pair.name == "Abdessamad Ezzalzouli" and result[0] == "approved" for pair, result in guard.items()),
         f"sample holds {SAMPLE_SIZE} rows": sampled == SAMPLE_SIZE,
     }
+
+
+def main():
+    unmerged = positions_for_join(merges=False)
+    shots = load_shots()
+    clubs = understat_to_fbref_clubs()
+    merged, merges, refused = merge_fbref_ids(unmerged)
+    with contextlib.redirect_stdout(io.StringIO()):
+        joined_off, pool_off, candidates_off, _ = measure(unmerged, shots, clubs, refused, merges_on=False)
+    joined_on, pool_on, candidates_on, checks = measure(merged, shots, clubs, refused, merges_on=True)
+    print(f"\n### Id merges\nMerged: {[(merge.league, merge.year, merge.player, merge.ids, merge.survivor) for merge in merges]} | refused: {refused}")
+    print(f"Merges off: joined {joined_off} | Pool {pool_off} of {candidates_off}")
+    print(f"Merges on: joined {joined_on} | Pool {pool_on} of {candidates_on}")
+    checks[f"merges off: Pool is {EXPECTED_MERGES_OFF}"] = (pool_off, candidates_off) == EXPECTED_MERGES_OFF
+    checks[f"merges on: Pool is {EXPECTED_MERGES_ON}"] = (pool_on, candidates_on) == EXPECTED_MERGES_ON
+    print("\n### Checks")
     for label, passed_check in checks.items():
         print(f"{'PASS' if passed_check else 'FAIL'}: {label}")
     if not all(checks.values()):
