@@ -75,3 +75,61 @@ _Avoid_: Backtest, stability
 **Blind spot-check**:
 The part of the outside review where a non-Claude model rates top-5 twin lists as plausible or not, on playing style alone. The reviewer sees player names and seasons, and has not seen our method, code or validation results.
 _Avoid_: Face validity
+
+### Stand-in data and the join
+
+**Stand-in source**:
+The private files in `data/standin/` (worldfootballR Understat shots, FBref positions and minutes, Hugging Face season totals) that stand in for live Understat while it is down. It may never publish. Code: `twin/infrastructure/standin/`.
+_Avoid_: Test data, mock source
+
+**Understat id**:
+Understat's `player_id` on a shot row. It shares no id system with FBref, so a join to FBref goes through name, club and season inside a linked match.
+_Avoid_: Player id (alone), shot id
+
+**FBref id**:
+The 8-character id in an FBref `Player_Href`. A PlayerSeason is keyed on it.
+_Avoid_: Player id (alone), href
+
+**Shot**:
+One Understat shot row joined to a PlayerSeason, with its place, xG and outcome. Code: `twin.domain.records.Shot`.
+_Avoid_: Attempt, event
+
+**Season totals**:
+One player-season's row in the Hugging Face file (`understat_xg_data`): minutes, goals, assists, shots, key passes, xA and xG buildup, found by the one written lookup (Q5).
+_Avoid_: Season stats, aggregates
+
+**Id merge**:
+Two FBref ids for one player kept as one, only when name, team and season match and their matches never overlap. The merged player keeps the id they hold in other seasons, else the one with more minutes in that league-season.
+_Avoid_: Dedupe, combine
+
+**Name map**:
+Step 2 of the join: a shot name with no roster match links to the one unmatched roster player on that club in that match who shares a last name or a whole name part. Each kept link is one row per player-season in `data/standin/name_map.csv`.
+_Avoid_: Fuzzy match, alias table
+
+**Season anchor**:
+Step 3 of the join: in a match where step 2 found 2+ candidates, the link the same Understat id holds to one FBref id in at least 2 other matches that season for the same club.
+_Avoid_: Season link, anchor match
+
+**Minutes guard**:
+The check on every name map and season anchor link: Understat season minutes against the linked id's FBref minutes, within the larger of 90 minutes or 10%. A link beyond the limit is listed for review and not joined.
+_Avoid_: Minutes check (alone), sanity check
+
+**Id collision**:
+Two Understat ids on one FBref id in one league-season. Both stay unjoined and listed, unless a `merge_ids` review decision says so.
+_Avoid_: Duplicate, clash
+
+**Partial join**:
+A player-season with less than 95% of its shot rows in linked matches joined, or a Pool candidate with no joined shots. Its shot and per-90 metrics are not used until review.
+_Avoid_: Incomplete player, low coverage
+
+**Held for review**:
+A PlayerSeason that a review flag holds out of the Pool, and whose shot and per-90 metrics are not used. Code: `PlayerSeason.held_for_review`.
+_Avoid_: Excluded, filtered
+
+**Review decision**:
+One row of Ahmed's `data/standin/review_decisions.csv`: an item type, its key, and `approve`, `reject`, `link_to` or `merge_ids`. Only these rows restore a stopped link or release a held PlayerSeason.
+_Avoid_: Override, manual fix
+
+**Shot gap**:
+The absolute difference between a PlayerSeason's season totals shots and its shot rows minus own goals. A gap over 3 needs a review decision. A non-zero gap is `unexplained` until Ahmed's review gives its cause.
+_Avoid_: Shot error, mismatch
