@@ -12,7 +12,9 @@ from typing import NamedTuple
 
 import pandas as pd
 
-DATA = Path(__file__).resolve().parents[3] / "data" / "standin"
+from twin.domain.pool import is_pool_candidate
+
+DATA =Path(__file__).resolve().parents[3] / "data" / "standin"
 SHOT_FILE_OF_LEAGUE = {"ENG": "epl", "ESP": "la_liga", "FRA": "ligue_1", "GER": "bundesliga", "ITA": "serie_a"}
 POOL_FIRST_SEASON, POOL_LAST_SEASON = 2017, 2023
 MAX_LINK_GAP_DAYS = 14
@@ -20,6 +22,7 @@ LISTED_GAP_DAYS = 1
 FOLDED_LETTERS = str.maketrans({"ø": "o", "ð": "d", "đ": "dj", "ı": "i", "ł": "l", "ß": "ss", "æ": "ae", "œ": "oe", "þ": "th"})
 MIN_ANCHOR_MATCHES = 2
 FULL_JOIN_PERCENT = 95
+MAX_SHOT_GAP = 3  # D3: do not raise it
 ATTACKING_POS = {"FW", "LW", "RW", "AM"}
 LINK_ITEM_TYPES = {"name_map", "season_anchor"}
 ITEM_TYPES = LINK_ITEM_TYPES | {"partial_join", "player_season", "cross_season_ids"}
@@ -123,18 +126,36 @@ class Anchors(NamedTuple):
 
 
 class SeasonRow(NamedTuple):
-    """One row of the season totals file: the FBref clubs of its team list, and its minutes."""
+    """One row of the season totals file: the FBref clubs of its team list, its minutes, and the totals the records carry."""
     clubs: set
     minutes: int
+    shots: int = None
+    goals: int = None
+    assists: int = None
+    key_passes: int = None
+    xa: float = None
+    xg_buildup: float = None
 
 
 class GuardFacts(NamedTuple):
-    """What the minutes guard and the totals lookup read."""
+    """What the minutes guard and the totals lookup read.
+
+    `shot_counts` holds each Understat player-season's shot rows minus own goals, for the shot-count check (D3). Hand-made
+    facts for the rule 3 clauses carry none.
+    """
     season_rows: dict
     fbref_minutes: dict
     fbref_names: dict
     fbref_clubs: dict
     shot_names: dict
+    shot_counts: dict = None
+
+
+class SeasonTotals(NamedTuple):
+    """Q5's answer for one PlayerSeason: its single row or None, the route that found it, and its shot gap (D3) or None."""
+    row: SeasonRow
+    route: str
+    gap: int
 
 
 class Rule3(NamedTuple):
@@ -177,6 +198,10 @@ class JoinResult(NamedTuple):
     combined_outside_pool: list
     refused_merges: list
     unjoined_listed: list
+    facts: GuardFacts  # as the combines left them, for the records' totals lookup
+    season_totals: dict  # each candidate's SeasonTotals, after the decisions
+    listed_gaps: list  # (candidate, gap, "approved" or "held"): every gap over 3 that did not fail the run (D3)
+    held_without_totals: list  # candidates another flag holds that have no single totals row (D4)
 
 
 def without_tie_breakers(positions):
@@ -217,7 +242,7 @@ def with_side(rows):
 
 
 def load_shots(files=StandinFiles()):
-    rows = shot_files(files, ["season", "match_id", "date", "player", "player_id", "home_team", "away_team", "h_a", "home_away", "result"])
+    rows = shot_files(files, ["season", "match_id", "date", "player", "player_id", "home_team", "away_team", "h_a", "home_away", "X", "Y", "xG", "situation", "shotType", "lastAction", "result"])
     rows = rows[rows["season"].between(POOL_FIRST_SEASON, POOL_LAST_SEASON)].copy()
     rows["season"] = rows["season"].astype(int)
     rows["player_id"] = rows["player_id"].astype(int)
@@ -448,34 +473,65 @@ def minutes_limit(understat_minutes, fbref_minutes):
 
 def season_rows_by_name(clubs, files=StandinFiles()):
     """The season totals file per league, Understat season and name."""
-    rows = pd.read_parquet(files.path("understat_xg_data.parquet"), columns=["player_name", "team", "league", "season", "minutes"])
+    columns = ["player_name", "team", "league", "season", "minutes", "shots", "goals", "assists", "key_passes", "xA", "xGBuildup"]
+    rows = pd.read_parquet(files.path("understat_xg_data.parquet"), columns=columns)
     index = defaultdict(list)
-    for league, season, name, team, minutes in zip(rows["league"], rows["season"], rows["player_name"], rows["team"], rows["minutes"]):
+    for name, team, league, season, minutes, shots, goals, assists, key_passes, xa, xg_buildup in zip(*(rows[column] for column in columns)):
         league = "ENG" if league == "EPL" else league
-        index[(league, int(season[:4]), html.unescape(name))].append(SeasonRow({clubs.get((league, part.strip())) for part in team.split(",")}, int(minutes)))
+        found = SeasonRow({clubs.get((league, part.strip())) for part in team.split(",")}, int(minutes), int(shots), int(goals), int(assists), int(key_passes), float(xa), float(xg_buildup))
+        index[(league, int(season[:4]), html.unescape(name))].append(found)
     return index
 
 
 def guard_facts(positions, shots, season_rows):
     fbref_minutes = {key: int(value) for key, value in positions.groupby(["league", "Season_End_Year", "fbref_id"])["Min"].sum().items()}
     fbref_names = positions.groupby(["league", "Season_End_Year", "fbref_id"])["Player"].agg(lambda names: sorted(set(names))).to_dict()
-    fbref_clubs, shot_names = defaultdict(set), defaultdict(set)
+    fbref_clubs, shot_names, shot_counts = defaultdict(set), defaultdict(set), Counter()
     for league, year, club, fbref_id in zip(positions["league"], positions["Season_End_Year"], positions["Team"], positions["fbref_id"]):
         fbref_clubs[(league, year, fbref_id)].add(club)
-    for league, season, understat_id, name in zip(shots["league"], shots["season"], shots["player_id"], shots["player"]):
+    for league, season, understat_id, name, result in zip(shots["league"], shots["season"], shots["player_id"], shots["player"], shots["result"]):
         shot_names[(league, season, understat_id)].add(html.unescape(name))
-    return GuardFacts(season_rows, fbref_minutes, fbref_names, fbref_clubs, shot_names)
+        # D3: totals against all shot rows minus own goals, in linked matches or not.
+        shot_counts[(league, season, understat_id)] += result != "OwnGoal"
+    return GuardFacts(season_rows, fbref_minutes, fbref_names, fbref_clubs, shot_names, dict(shot_counts))
+
+
+def season_totals_lookup(facts, league, season, shot_names, fbref_id):
+    """Q5, the one lookup: the player-season's shot names, then the linked FBref name. If 2+ rows match, the one with the linked club.
+
+    Returns (row, route), with row None when no single row is left.
+    """
+    year = season + 1
+    rows, route = [row for name in sorted(shot_names) for row in facts.season_rows.get((league, season, name), [])], "shot name"
+    if not rows:
+        rows, route = [row for name in facts.fbref_names.get((league, year, fbref_id), []) for row in facts.season_rows.get((league, season, html.unescape(name)), [])], "FBref name"
+    if len(rows) > 1:
+        rows, route = [row for row in rows if row.clubs & facts.fbref_clubs.get((league, year, fbref_id), set())], f"{route} + club"
+    return (rows[0], route) if len(rows) == 1 else (None, None)
 
 
 def season_totals_row(facts, league, season, shot_names, fbref_id):
-    """Q5, the one lookup: the player-season's shot names, then the linked FBref name. If 2+ rows match, the one with the linked club. Else None."""
-    year = season + 1
-    rows = [row for name in sorted(shot_names) for row in facts.season_rows.get((league, season, name), [])]
-    if not rows:
-        rows = [row for name in facts.fbref_names.get((league, year, fbref_id), []) for row in facts.season_rows.get((league, season, html.unescape(name)), [])]
-    if len(rows) > 1:
-        rows = [row for row in rows if row.clubs & facts.fbref_clubs.get((league, year, fbref_id), set())]
-    return rows[0] if len(rows) == 1 else None
+    return season_totals_lookup(facts, league, season, shot_names, fbref_id)[0]
+
+
+def season_totals(facts, links, keys):
+    """Q5 for each PlayerSeason (league, FBref year, FBref id), through every spelling of the Understat ids its links reach, with its shot gap (D3).
+
+    The gap is the absolute difference between the totals' shots and those ids' shot rows minus own goals. A PlayerSeason
+    with no joined shots has no gap.
+    """
+    ids_of = defaultdict(set)
+    for group, link in links.items():
+        ids_of[(group.league, group.season + 1, link[1])].add(group.understat_id)
+    found = {}
+    for key in keys:
+        league, year, fbref_id = key
+        ids = ids_of.get(key, set())
+        names = {name for understat_id in ids for name in facts.shot_names.get((league, year - 1, understat_id), ())}
+        row, route = season_totals_lookup(facts, league, year - 1, names, fbref_id)
+        rows_minus_own_goals = sum((facts.shot_counts or {}).get((league, year - 1, understat_id), 0) for understat_id in ids)
+        found[key] = SeasonTotals(row, route, abs(row.shots - rows_minus_own_goals) if row is not None and row.shots is not None and ids else None)
+    return found
 
 
 def minutes_guard(pairs, facts):
@@ -579,20 +635,32 @@ def partial_joins(rows_of, final):
     return {key: counts for key, counts in join_counts(rows_of, final).items() if counts[0] * 100 < counts[1] * FULL_JOIN_PERCENT}
 
 
-def pool_candidates(positions, files=StandinFiles()):
-    """PlayerSeasons at 900+ minutes with attacking minutes above other minutes, substitute appearances ignored."""
-    events = pd.concat([pd.read_parquet(files.path(f"{league}_M_1st_match_summary.parquet"), columns=["MatchURL", "Team", "Event_Type", "Event_Players"]) for league in SHOT_FILE_OF_LEAGUE])
+def read_events(files=StandinFiles()):
+    return pd.concat([pd.read_parquet(files.path(f"{league}_M_1st_match_summary.parquet"), columns=["MatchURL", "Team", "Event_Type", "Event_Players"]) for league in SHOT_FILE_OF_LEAGUE])
+
+
+def position_minutes(positions, events):
+    """Plan line 107: minutes, attacking minutes and other minutes per PlayerSeason, keyed (league, FBref year, FBref id).
+
+    A row is attacking if any Pos label is attacking. Substitute appearances count for minutes and are ignored for position.
+    A match with no event rows has no substitutes to tell apart, so each appearance there counts as a start (plan line 126).
+    """
     substitutes = events[events["Event_Type"] == "Substitute"].drop_duplicates(["MatchURL", "Team", "Event_Players"])
     came_on = set(zip(substitutes["MatchURL"].str.extract(r"/matches/([0-9a-f]{8})/", expand=False), substitutes["Team"], substitutes["Event_Players"].str.split(" for ").str[0].str.strip()))
     is_substitute = pd.Series([key in came_on for key in zip(positions["match"], positions["Team"], positions["Player"])], index=positions.index)
     is_attacking = pd.Series([bool(set(pos.split(",")) & ATTACKING_POS) for pos in positions["Pos"]], index=positions.index)
     keys = ["league", "Season_End_Year", "fbref_id"]
-    totals = pd.DataFrame({
+    return pd.DataFrame({
         "total": positions.groupby(keys)["Min"].sum(),
         "attacking": positions[~is_substitute & is_attacking].groupby(keys)["Min"].sum(),
         "other": positions[~is_substitute & ~is_attacking].groupby(keys)["Min"].sum(),
     }).fillna(0)
-    return sorted(totals[(totals["total"] >= 900) & (totals["attacking"] > totals["other"])].index)
+
+
+def pool_candidates(positions, files=StandinFiles()):
+    """PlayerSeasons that meet the domain's Pool rule on minutes and position, before any review flag."""
+    totals = position_minutes(positions, read_events(files))
+    return sorted(key for key, total, attacking, other in zip(totals.index, totals["total"], totals["attacking"], totals["other"]) if is_pool_candidate(total, attacking, other))
 
 
 def review_flags(candidates, final, partial, two_ids):
@@ -714,13 +782,24 @@ def drop_anchors_without_evidence(rule3, rows, items, links):
     return sorted(removed)
 
 
-def finish_join(rule3, rows_of, rosters, positions, decisions, refused, candidates_of, facts, merges_on=True):
-    """Plan lines 142 to 146: apply Ahmed's rows after rule 3, then every check again. Rows are sorted, and the checks run after them all, so order never matters."""
+def finish_join(rule3, rows_of, rosters, positions, decisions, refused, candidates_of, facts, merges_on=True, season_checks=False):
+    """Plan lines 142 to 146: apply Ahmed's rows after rule 3, then every check again. Rows are sorted, and the checks run after them all, so order never matters.
+
+    `season_checks` turns on D3 and D4, which compare whole-season totals with shot rows. The whole run on data/standin
+    turns them on. The test samples are cut as whole matches, so their players hold partial seasons, and their tests leave them off.
+    """
     rows = sorted(decisions, key=lambda row: (ROW_ORDER[row["item_type"]], row["key"]))
     candidates = candidates_of(positions)
     candidate_set = set(candidates)
     partial_before = partial_joins(rows_of, rule3.final)
     flags_before = review_flags(candidates, rule3.final, partial_before, two_id_player_seasons(rule3.final, rosters, []))
+    # D3 and D4 flag a candidate too, so its player_season key exists before the decisions (spec, "What a review key covers").
+    if season_checks:
+        for key, found in season_totals(facts, rule3.final, candidates).items():
+            if found.row is None:
+                flags_before.setdefault(key, set()).add("no single totals row")
+            elif found.gap is not None and found.gap > MAX_SHOT_GAP:
+                flags_before.setdefault(key, set()).add("shot gap over 3")
     items = link_items(rule3)
     counts = join_counts(rows_of, rule3.final)
     partial_keys = {partial_join_key(key): key for key, (found, total) in counts.items() if found < total}
@@ -965,6 +1044,31 @@ def finish_join(rule3, rows_of, rosters, positions, decisions, refused, candidat
     for season_key in rejected_seasons:
         flags.setdefault(season_key, set()).add("rejected")
 
+    # D3 and D4, after the decisions and on the combined records: a candidate no flag holds needs one totals row and a gap of 3 or less.
+    totals_after, listed_gaps, held_without_totals = {}, [], []
+    if season_checks:
+        totals_after = season_totals(facts, links, candidates_after)
+        for key in candidates_after:
+            found, review_key = totals_after[key], player_season_key(key)
+            has_gap = found.gap is not None and found.gap > MAX_SHOT_GAP
+            if key in flags:
+                if found.row is None:
+                    held_without_totals.append(key)
+                elif has_gap:
+                    listed_gaps.append((key, found.gap, "held"))
+                continue
+            player = f"{', '.join(facts.fbref_names.get(key, [])) or 'Pool candidate'} ({review_key})"
+            if found.row is None:
+                must(key not in approved_seasons, f"approve on player_season {review_key}: it has no single season totals row, so 3 of its 10 metrics would read as zero. Use reject")
+                must(False, f"no single season totals row for {player}, and no other flag holds it. Review it: reject on player_season {review_key} holds it")
+                # The merges-off run does not stop (D21), so the candidate is held there and never counted in the Pool.
+                flags.setdefault(key, set()).add("no single totals row")
+            elif has_gap and key in approved_seasons:
+                listed_gaps.append((key, found.gap, "approved"))
+            elif has_gap:
+                must(False, f"shot gap of {found.gap} for {player}: season totals give {found.row.shots} shots. Review it: approve on player_season {review_key} lets this gap pass, reject holds it")
+                flags.setdefault(key, set()).add("shot gap over 3")
+
     cross_season_cases = []
     if merges_on:
         fbref_ids_of = defaultdict(set)
@@ -1013,4 +1117,5 @@ def finish_join(rule3, rows_of, rosters, positions, decisions, refused, candidat
         finished, positions, candidates_after, flags, pool, partial, len(pool_of(candidates, flags_before)), len(pool), joined_before, joined_after,
         {key: ids for key, ids in rule3.collisions.items() if key not in {restored for restored, _ in merged_collisions} and key not in settled and not set(ids) <= decided[key]}, merge_rows, merged_on_id, anchors_removed, cross_season_cases,
         [(league, year, new_id) for (league, year, _), new_id in sorted(combine.items()) if (league, year, new_id) not in set(candidates_after)], list(refused), unjoined_listed,
+        facts, totals_after, listed_gaps, held_without_totals,
     )
