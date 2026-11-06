@@ -1,21 +1,22 @@
 """Rule 2, id merges and rule 3 of docs/phase-1-plan.md: raw stand-in rows to the final join of shots to FBref players."""
-import csv
 import html
-import io
 import re
 import unicodedata
 from collections import Counter, defaultdict
-from dataclasses import dataclass
 from datetime import date
-from pathlib import Path
 from typing import NamedTuple
 
 import pandas as pd
 
 from twin.domain.pool import is_pool_candidate
+from twin.infrastructure.standin.files import DATA, StandinFiles, csv_text_rows, read_review_decision_rows
 
-DATA =Path(__file__).resolve().parents[3] / "data" / "standin"
 SHOT_FILE_OF_LEAGUE = {"ENG": "epl", "ESP": "la_liga", "FRA": "ligue_1", "GER": "bundesliga", "ITA": "serie_a"}
+# Every file the loader reads that MANIFEST.md hashes: all but review_decisions.csv, which Ahmed edits by hand.
+HASHED_FILES = (
+    [f"{league}_M_1st_{kind}.parquet" for league in SHOT_FILE_OF_LEAGUE for kind in ("positions", "match_summary")]
+    + [f"{stem}_shot_data.parquet" for stem in SHOT_FILE_OF_LEAGUE.values()] + ["understat_xg_data.parquet", "club_map.csv"]
+)
 POOL_FIRST_SEASON, POOL_LAST_SEASON = 2017, 2023
 MAX_LINK_GAP_DAYS = 14
 LISTED_GAP_DAYS = 1
@@ -29,16 +30,6 @@ ITEM_TYPES = LINK_ITEM_TYPES | {"partial_join", "player_season", "cross_season_i
 DECISIONS = {"approve", "reject", "link_to", "merge_ids"}
 # Links first, then what is left unjoined, then whole records, so one order holds whatever order Ahmed's rows are in.
 ROW_ORDER = {"cross_season_ids": 0, "name_map": 1, "season_anchor": 2, "partial_join": 3, "player_season": 4}
-
-
-@dataclass(frozen=True)
-class StandinFiles:
-    """Where the stand-in files are. The tests point it at the real samples, whose names carry a prefix."""
-    folder: Path = DATA
-    prefix: str = ""
-
-    def path(self, name):
-        return self.folder / f"{self.prefix}{name}"
 
 
 class DateLinks(NamedTuple):
@@ -213,7 +204,7 @@ def load_positions(files=StandinFiles()):
     frames = []
     for league in SHOT_FILE_OF_LEAGUE:
         columns = ["MatchURL", "Match_Date", "Matchweek", "Season_End_Year", "Home_Team", "Away_Team", "Team", "Player", "Player_Href", "Pos", "Min"]
-        frames.append(pd.read_parquet(files.path(f"{league}_M_1st_positions.parquet"), columns=columns).assign(league=league))
+        frames.append(files.parquet(f"{league}_M_1st_positions.parquet", columns).assign(league=league))
     rows = pd.concat(frames, ignore_index=True)
     rows = without_tie_breakers(rows[rows["Season_End_Year"].between(POOL_FIRST_SEASON + 1, POOL_LAST_SEASON + 1)]).copy()
     rows["match"] = rows["MatchURL"].str.extract(r"/matches/([0-9a-f]{8})/", expand=False)
@@ -225,9 +216,9 @@ def shot_files(files=StandinFiles(), columns=None):
     """Every season's shot rows. The league comes from the file name, because the `league` column spells one league two ways (T7:59)."""
     frames = []
     for league, stem in SHOT_FILE_OF_LEAGUE.items():
-        path = files.path(f"{stem}_shot_data.parquet")
-        rows = pd.read_parquet(path, columns=columns)
-        frames.append(rows.assign(league=league, source_file=path.name, source_row=range(len(rows))))
+        name = f"{stem}_shot_data.parquet"
+        rows = files.parquet(name, columns)
+        frames.append(rows.assign(league=league, source_file=files.path(name).name, source_row=range(len(rows))))
     return pd.concat(frames, ignore_index=True)
 
 
@@ -256,7 +247,7 @@ def earlier_shots(files=StandinFiles()):
 
 
 def understat_to_fbref_clubs(files=StandinFiles()):
-    club_map = pd.read_csv(files.path("club_map.csv"), keep_default_na=False)
+    club_map = files.csv("club_map.csv", ["league", "understat_club", "fbref_club"])
     return {(row.league, row.understat_club): row.fbref_club for row in club_map.itertuples() if row.understat_club and row.fbref_club}
 
 
@@ -474,7 +465,7 @@ def minutes_limit(understat_minutes, fbref_minutes):
 def season_rows_by_name(clubs, files=StandinFiles()):
     """The season totals file per league, Understat season and name."""
     columns = ["player_name", "team", "league", "season", "minutes", "shots", "goals", "assists", "key_passes", "xA", "xGBuildup"]
-    rows = pd.read_parquet(files.path("understat_xg_data.parquet"), columns=columns)
+    rows = files.parquet("understat_xg_data.parquet", columns)
     index = defaultdict(list)
     for name, team, league, season, minutes, shots, goals, assists, key_passes, xa, xg_buildup in zip(*(rows[column] for column in columns)):
         league = "ENG" if league == "EPL" else league
@@ -615,7 +606,7 @@ def name_map_file_rows(rule3, name_of):
 
 def check_sample_pairs(drawn, committed_text):
     """D12: Ahmed's check (b) rests on these 50 pairs, so a new draw stops the run. `drawn` holds (league, season, Understat id, FBref id)."""
-    committed = {(row["league"], int(row["understat_season"]), int(row["understat_id"]), row["fbref_id"]) for row in csv.DictReader(io.StringIO(committed_text))}
+    committed = {(row["league"], int(row["understat_season"]), int(row["understat_id"]), row["fbref_id"]) for row in csv_text_rows(committed_text)}
     if drawn != committed:
         raise SystemExit(f"docs/reports/name_map_sample.csv: the drawn pairs differ from the committed file: {sorted(drawn ^ committed)}. A new draw needs Ahmed's approval in a commit. Way back: git checkout that file.")
 
@@ -636,7 +627,7 @@ def partial_joins(rows_of, final):
 
 
 def read_events(files=StandinFiles()):
-    return pd.concat([pd.read_parquet(files.path(f"{league}_M_1st_match_summary.parquet"), columns=["MatchURL", "Team", "Event_Type", "Event_Players"]) for league in SHOT_FILE_OF_LEAGUE])
+    return pd.concat([files.parquet(f"{league}_M_1st_match_summary.parquet", ["MatchURL", "Team", "Event_Type", "Event_Players"]) for league in SHOT_FILE_OF_LEAGUE])
 
 
 def position_minutes(positions, events):
@@ -692,9 +683,7 @@ def pool_of(candidates, flags):
 
 def read_review_decisions(path=DATA / "review_decisions.csv"):
     """Every row of Ahmed's file, checked on its own. The stops that need the join's output are in `finish_join`."""
-    # utf-8-sig: spreadsheets save this hand-edited file with a byte order mark.
-    with path.open(encoding="utf-8-sig", newline="") as handle:
-        decisions = list(csv.DictReader(handle))
+    decisions = read_review_decision_rows(path)
     for row in decisions:
         if row["item_type"] not in ITEM_TYPES or row["decision"] not in DECISIONS:
             raise SystemExit(f"{path.name}: unknown item_type or decision: {row}")
