@@ -2,8 +2,8 @@
 
 Usage: python3 scripts/measure_rule3.py
 
-Prints the join table, the minutes guard results, the season anchors, the partial joins and the id collisions, with the
-checks behind them. Writes data/standin/name_map.csv, and a fixed random sample of it to docs/reports/name_map_sample.csv.
+Prints the join table, the minutes guard results, the season anchors, the partial joins, the id collisions and the
+records the stand-in loader builds, with the checks behind them. Writes data/standin/name_map.csv, and a fixed random sample of it to docs/reports/name_map_sample.csv.
 Reads data/standin only, makes no network calls, and the same files give identical output. All the join logic is in
 twin/infrastructure/standin/player_join.py, so one version exists. It runs twice, with the FBref id merges off and then on,
 and prints one `Merges` line for each. Every other section, and the files, come from the merges-on run only.
@@ -23,8 +23,10 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+from twin.domain.pool import in_pool, is_pool_candidate
+from twin.infrastructure.standin.loader import build_records
 from twin.infrastructure.standin.player_join import (
-    MIN_ANCHOR_MATCHES, anchor_listing, build_rosters, check_sample_pairs, compared_name, finish_join, guard_facts, guard_review_list, join_counts, link_keys, link_matches, load_positions,
+    MAX_SHOT_GAP, MIN_ANCHOR_MATCHES, anchor_listing, build_rosters, check_sample_pairs, compared_name, finish_join, guard_facts, guard_review_list, join_counts, link_keys, link_matches, load_positions,
     load_shots, merge_fbref_ids, minutes_limit, name_map_file_rows, partial_joins, pool_candidates, positions_for_join, read_review_decisions, rule3_links, season_rows_by_name, shot_groups,
     understat_to_fbref_clubs,
 )
@@ -80,6 +82,24 @@ def write_outputs(rule3, names):
     return len(drawn)
 
 
+def print_records(run, result):
+    """The records built from this run, and the season totals checks behind them (D3, D4). Returns the records' Pool count."""
+    found = run.loaded.player_seasons
+    candidates = [player_season for player_season in found if is_pool_candidate(player_season.minutes, player_season.attacking_minutes, player_season.other_minutes)]
+    pool = sum(map(in_pool, found))
+    held = sum(player_season.held_for_review for player_season in found)
+    print(f"Records: player_seasons {len(found)} | shots {len(run.loaded.shots)} | minutes {sum(player_season.minutes for player_season in found)} | Pool candidates {len(candidates)} | held {held} | held among candidates {sum(player_season.held_for_review for player_season in candidates)} | Pool {pool}")
+    routes = Counter()
+    for key in result.candidates:
+        totals = result.season_totals[key]
+        routes[totals.route if totals.row is not None else "no single row, already held" if key in result.flags else "no single row, not otherwise held"] += 1
+    labels = ("shot name", "shot name + club", "FBref name", "no single row, not otherwise held", "no single row, already held")
+    print("Season totals: " + " | ".join(f"{label} {routes.pop(label, 0)}" for label in labels) + "".join(f" | {label} {count}" for label, count in sorted(routes.items())))
+    gaps = Counter(totals.gap for totals in result.season_totals.values() if totals.gap is not None)
+    print(f"Shot gap: {' '.join(f'{gap}={count}' for gap, count in sorted(gaps.items()))} | over {MAX_SHOT_GAP}: {sum(count for gap, count in gaps.items() if gap > MAX_SHOT_GAP)}")
+    return pool
+
+
 def measure(positions, shots, clubs, refused, merges_on):
     """One whole run. Returns the joined rows, the Pool count, the candidates and the checks. Only the merges-on run writes files."""
     date_links = link_matches(shots, positions, clubs)
@@ -104,7 +124,7 @@ def measure(positions, shots, clubs, refused, merges_on):
     decisions = read_review_decisions()
     facts = guard_facts(positions, shots, understat_minutes)
     before_decisions = rule3_links(rows_of, rosters, facts)
-    result = finish_join(before_decisions, rows_of, rosters, positions, decisions, refused, pool_candidates, facts, merges_on)
+    result = finish_join(before_decisions, rows_of, rosters, positions, decisions, refused, pool_candidates, facts, merges_on, season_checks=True)
     rule3 = result.rule3
     joined, name_map, pair_of, name_map_rows, matches_of, guard, after_guard = rule3.joined, rule3.name_map, rule3.pair_of, rule3.name_map_rows, rule3.matches_of, rule3.guard, rule3.after_guard
     anchors, anchor_pair_of, anchor_rows, anchor_matches, anchor_guard = rule3.anchors, rule3.anchor_pair_of, rule3.anchor_rows, rule3.anchor_matches, rule3.anchor_guard
@@ -260,6 +280,10 @@ def measure(positions, shots, clubs, refused, merges_on):
     print(f"PlayerSeasons held by a flag: {len(flags)}, of them candidates {sum(key in pool_set for key in flags)}")
     print(f"Pool before the decisions: {result.pool_before} | after: {result.pool_after} | joined before: {result.joined_before} | after: {result.joined_after}")
     print(f"Pool until Ahmed's review: {pool_count} of {len(pool)} candidates")
+    records_pool = pool_count
+    if merges_on:
+        print("\n### Records")
+        records_pool = print_records(build_records(result, shots, row_groups), result)
 
     sampled = SAMPLE_SIZE
     if merges_on:
@@ -273,6 +297,7 @@ def measure(positions, shots, clubs, refused, merges_on):
         f"at least {MIN_JOINED_ROWS} rows joined": count(final) >= MIN_JOINED_ROWS,
         "Ezzalzouli approved": any(pair.name == "Abdessamad Ezzalzouli" and result[0] == "approved" for pair, result in guard.items()),
         f"sample holds {SAMPLE_SIZE} rows": sampled == SAMPLE_SIZE,
+        "the records give the join's Pool": records_pool == pool_count,
     }
 
 

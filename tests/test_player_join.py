@@ -943,12 +943,12 @@ def at_900_minutes(positions):
     return sorted(totals[totals >= 900].index)
 
 
-def hand_run(rows_of, rosters, decisions=(), candidates=(), refused=(), positions=None, facts=None, merges_on=True):
+def hand_run(rows_of, rosters, decisions=(), candidates=(), refused=(), positions=None, facts=None, merges_on=True, season_checks=False):
     """The whole of stage D on hand-made rows. Only synthetic tests use it."""
     facts = facts or hand_facts(dict.fromkeys("xyzc", 900))
     rule3 = join.rule3_links(rows_of, rosters, facts)
     candidates_of = candidates if callable(candidates) else lambda _: sorted(candidates)
-    return join.finish_join(rule3, rows_of, rosters, positions_of(rosters) if positions is None else positions, list(decisions), list(refused), candidates_of, facts, merges_on)
+    return join.finish_join(rule3, rows_of, rosters, positions_of(rosters) if positions is None else positions, list(decisions), list(refused), candidates_of, facts, merges_on, season_checks)
 
 
 @lru_cache(maxsize=None)
@@ -1665,8 +1665,8 @@ class StageDReviewDecisions(unittest.TestCase):
         real_finish = join.finish_join
         forced = []
 
-        def with_forced_verdict(*run):
-            result = real_finish(*run)
+        def with_forced_verdict(*run, **options):
+            result = real_finish(*run, **options)
             pair = sorted(result.rule3.anchor_rows)[0]
             forced.append((pair, result.rule3.name_map_rows[pair] + result.rule3.anchor_rows[pair]))
             return result._replace(rule3=result.rule3._replace(anchor_guard={**result.rule3.anchor_guard, pair: ("none", None, 900)}))
@@ -2100,7 +2100,7 @@ def generated_case(rnd):
 def generated_frames(case, rename):
     _, positions, groups, seasons = case
     raw = fbref_rows(*[(match, "2022-01-10", "A", "B", club, name, rename[fbref_id], minutes) for match, club, name, fbref_id, minutes in positions]).assign(Season_End_Year=2022)
-    shots = pd.DataFrame([("ESP", 2021, understat_id, name) for _, understat_id, name, _, _ in groups], columns=["league", "season", "player_id", "player"]).drop_duplicates()
+    shots = pd.DataFrame([("ESP", 2021, understat_id, name, "Goal") for _, understat_id, name, _, _ in groups], columns=["league", "season", "player_id", "player", "result"]).drop_duplicates()
     rows_of = {hand_group(match, understat_id, name, club): rows for match, understat_id, name, club, rows in groups}
     season_rows = {("ESP", 2021, name): [join.SeasonRow({club}, total) for club, total in found] for name, found in seasons.items()}
     return raw, shots, rows_of, season_rows
@@ -2273,6 +2273,116 @@ class MovedFromTheOldTestFile(unittest.TestCase):
         self.assertTrue(join.is_name_map_candidate(["kylian", "mbappe", "lottin"], ["kylian", "mbappe"]))
         self.assertFalse(join.is_name_map_candidate(["bruno"], ["brunos", "fernandes"]))
         self.assertTrue(join.is_name_map_candidate(["fernandes", "bruno"], ["bruno", "miguel", "fernandes"]))
+
+
+def totals_row(shots=10, club="A"):
+    """A hand-made season totals row. Only synthetic tests use it."""
+    return join.SeasonRow({club}, 900, shots=shots, goals=2, assists=1, key_passes=5, xa=0.5, xg_buildup=1.5)
+
+
+def totals_facts(season_rows, shot_rows=10):
+    """Hand-made facts with shot counts, so the season totals checks run (D3, D4). Only synthetic tests use it."""
+    return hand_facts(dict.fromkeys("xyzc", 900), season_rows=season_rows, fbref_names={("ESP", 2022, "x"): ["Kike"], ("ESP", 2022, "y"): ["Kike Lopez"]})._replace(shot_counts={("ESP", 2021, 1): shot_rows})
+
+
+def exact_case():
+    """Candidate x holds one exact link, every row joined, so no other flag holds it."""
+    group = hand_group("m1")
+    return {group: 1}, {("m1", "A"): hand_roster(("x", "Kike"))}
+
+
+CANDIDATE_X = [("ESP", 2022, "x")]
+
+
+def checked_run(*args, **run):
+    """hand_run with D3 and D4 on."""
+    return hand_run(*args, season_checks=True, **run)
+GAP_OF_4 = {("ESP", 2021, "Kike"): [totals_row(shots=14)]}
+
+
+class Ticket3SeasonTotalsChecks(unittest.TestCase):
+    """D3, the shot-count check, and D4, a candidate with no single totals row. Both run after the review decisions."""
+
+    def assert_stops(self, *needles, **run):
+        with self.assertRaises(SystemExit) as stop:
+            checked_run(**run)
+        for needle in needles:
+            self.assertIn(needle, str(stop.exception))
+
+    def test_synthetic_shot_gap_over_3_fails_the_run(self):
+        # synthetic: 0 real. A candidate no other flag holds, totals 14 against 10 shot rows minus own goals.
+        rows_of, rosters = exact_case()
+        self.assertEqual(checked_run(rows_of, rosters, candidates=CANDIDATE_X, facts=totals_facts({("ESP", 2021, "Kike"): [totals_row(shots=13)]})).pool, CANDIDATE_X)
+        self.assert_stops("Kike", "ESP|2021|x", "shot gap of 4", rows_of=rows_of, rosters=rosters, candidates=CANDIDATE_X, facts=totals_facts(GAP_OF_4))
+
+    def test_synthetic_shot_rows_above_totals_by_over_3_fail_the_run(self):
+        # synthetic: 0 real, no gap is negative today (design check). The gap is the absolute difference.
+        rows_of, rosters = exact_case()
+        self.assert_stops("Kike", "shot gap of 4", rows_of=rows_of, rosters=rosters, candidates=CANDIDATE_X, facts=totals_facts({("ESP", 2021, "Kike"): [totals_row(shots=6)]}))
+
+    def test_synthetic_shot_gap_on_held_candidate_does_not_fail(self):
+        # synthetic: 0 real. `partial_join` already holds x, so the gap is listed and the run goes on.
+        _, _, rows_of, rosters = unjoined_case()
+        result = checked_run(rows_of, rosters, candidates=CANDIDATE_X, facts=totals_facts(GAP_OF_4))
+        self.assertEqual(result.pool, [])
+        self.assertIn((("ESP", 2022, "x"), 4, "held"), result.listed_gaps)
+
+    def test_synthetic_player_season_approve_allows_a_gap(self):
+        # synthetic: 0 real. `approve` lets that one gap pass, without raising the limit, and the report lists it.
+        rows_of, rosters = exact_case()
+        result = checked_run(rows_of, rosters, [decision("player_season", "ESP|2021|x", "approve")], CANDIDATE_X, facts=totals_facts(GAP_OF_4))
+        self.assertEqual(result.pool, CANDIDATE_X)
+        self.assertEqual(result.listed_gaps, [(("ESP", 2022, "x"), 4, "approved")])
+
+    def test_synthetic_player_season_reject_holds_a_gap(self):
+        # synthetic: 0 real.
+        rows_of, rosters = exact_case()
+        result = checked_run(rows_of, rosters, [decision("player_season", "ESP|2021|x", "reject")], CANDIDATE_X, facts=totals_facts(GAP_OF_4))
+        self.assertEqual(result.pool, [])
+        self.assertIn(("ESP", 2022, "x"), result.flags)
+
+    def test_synthetic_player_season_row_with_no_flag_stops_as_stale(self):
+        # synthetic: 0 real. Totals 10 against 10 rows, so x holds no flag and has no key.
+        rows_of, rosters = exact_case()
+        for verdict in ("approve", "reject"):
+            self.assert_stops("stale", "ESP|2021|x", rows_of=rows_of, rosters=rosters, decisions=[decision("player_season", "ESP|2021|x", verdict)], candidates=CANDIDATE_X, facts=totals_facts({("ESP", 2021, "Kike"): [totals_row()]}))
+
+    def test_synthetic_link_to_with_no_totals_fails_again_until_reject(self):
+        # synthetic: 0 real. x has no totals row, so it is flagged. `link_to` combines it under y, and the lookup with both ids' names still finds none.
+        rows_of, rosters = exact_case()
+        rosters = {**rosters, ("m3", "A"): hand_roster(("y", "Kike Lopez"))}
+        every_id = lambda found: sorted(set(zip(found["league"], found["Season_End_Year"], found["fbref_id"])))
+        run = {"rows_of": rows_of, "rosters": rosters, "candidates": every_id, "facts": totals_facts({})}
+        self.assert_stops("Kike Lopez", "ESP|2021|y", "no single season totals row", decisions=[decision("player_season", "ESP|2021|x", "link_to", "y")], **run)
+        result = checked_run(decisions=[decision("player_season", "ESP|2021|x", "reject")], **run)
+        self.assertEqual(result.pool, [])
+        self.assertIn(("ESP", 2022, "x"), result.flags)
+
+    def test_synthetic_no_single_totals_row_fails_the_run_and_names_the_player(self):
+        # synthetic: 0 real. No row, and 2+ rows that the club does not narrow, both leave no single row.
+        rows_of, rosters = exact_case()
+        for season_rows in ({}, {("ESP", 2021, "Kike"): [totals_row(), totals_row(shots=12)]}):
+            self.assert_stops("Kike", "ESP|2021|x", "no single season totals row", rows_of=rows_of, rosters=rosters, candidates=CANDIDATE_X, facts=totals_facts(season_rows))
+
+    def test_synthetic_clearing_a_flag_with_no_totals_row_fails_the_run(self):
+        # synthetic: 0 real. `partial_join` holds x, so no totals row is listed. Clearing that flag leaves it in the Pool with no row.
+        _, _, rows_of, rosters = unjoined_case()
+        held = checked_run(rows_of, rosters, candidates=CANDIDATE_X, facts=totals_facts({}))
+        self.assertEqual(held.held_without_totals, [("ESP", 2022, "x")])
+        self.assert_stops("Kike", "no single season totals row", rows_of=rows_of, rosters=rosters, decisions=[decision("partial_join", "ESP|2021|1", "approve")], candidates=CANDIDATE_X, facts=totals_facts({}))
+
+    def test_synthetic_player_season_reject_clears_missing_totals_and_holds(self):
+        # synthetic: 0 real.
+        rows_of, rosters = exact_case()
+        result = checked_run(rows_of, rosters, [decision("player_season", "ESP|2021|x", "reject")], CANDIDATE_X, facts=totals_facts({}))
+        self.assertEqual(result.pool, [])
+        self.assertIn(("ESP", 2022, "x"), result.flags)
+        self.assertEqual(result.held_without_totals, [("ESP", 2022, "x")])
+
+    def test_synthetic_approve_on_candidate_without_totals_stops(self):
+        # synthetic: 0 real. 3 of its 10 metrics would read as zero (D4).
+        rows_of, rosters = exact_case()
+        self.assert_stops("approve", "ESP|2021|x", "zero", rows_of=rows_of, rosters=rosters, decisions=[decision("player_season", "ESP|2021|x", "approve")], candidates=CANDIDATE_X, facts=totals_facts({}))
 
 
 if __name__ == "__main__":
