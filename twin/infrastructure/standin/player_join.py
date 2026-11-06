@@ -824,6 +824,9 @@ def finish_join(rule3, rows_of, rosters, positions, decisions, refused, candidat
                     merged.add((league, season, row["fbref_id"]))
                     collision_key = (league, season, row["fbref_id"])
                     collision_ids = rule3.collisions.get(collision_key, [])
+                    # The row restores a collision only if its own Understat id is in it (D49).
+                    if int(key.split("|")[2]) not in collision_ids:
+                        collision_ids = []
                     for group, link in rule3.after_anchor_guard.items():
                         if group.league == league and group.season == season and group.understat_id in collision_ids and link[1] == row["fbref_id"] and group not in rejected_groups:
                             links.setdefault(group, link)
@@ -989,11 +992,11 @@ def finish_join(rule3, rows_of, rosters, positions, decisions, refused, candidat
         rejected = rejected_by[group]
         stop(f"final check: {group.name} ({partial_join_key(group.player_season)}) in match {group.match} is joined on {links[group][1]} by {' and '.join(routes)}, but reject on {rejected['item_type']} {rejected['key']} left it unjoined. Keep one.")
 
-    # Final check (D48): a merge_ids row covers only the Understat ids it names: the one on its key, the one rule 3 already holds on that FBref id, and, on a link key, the rule 3 collision it restores (D38). Both runs stop, as for D46 and D47.
+    # Final check (D48, D49): a merge_ids row covers only the Understat ids it names: the one on its key, the one whose rule 3 link still stands on that FBref id, and, on a link key, the rule 3 collision its own id is in (D38). Both runs stop, as for D46 and D47.
     for key, ids in collisions_now.items():
         rows_on_id = [row for row in merge_rows if row["fbref_id"] == key[2] and row["key"].split("|")[:2] == [key[0], str(key[1])]]
-        named = {int(row["key"].split("|")[2]) for row in rows_on_id} | {group.understat_id for group, link in rule3.final.items() if (group.league, group.season, link[1]) == key}
-        if any(row["item_type"] in LINK_ITEM_TYPES for row in rows_on_id):
+        named = {int(row["key"].split("|")[2]) for row in rows_on_id} | {group.understat_id for group, link in rule3.final.items() if (group.league, group.season, link[1]) == key and group in links and links[group][1] == key[2]}
+        if any(row["item_type"] in LINK_ITEM_TYPES and int(row["key"].split("|")[2]) in rule3.collisions.get(key, []) for row in rows_on_id):
             named |= set(rule3.collisions.get(key, []))
         for understat_id in sorted(set(ids) - named):
             groups = [group for group, link in links.items() if group.player_season == (key[0], key[1], understat_id) and link[1] == key[2]]
@@ -1001,11 +1004,13 @@ def finish_join(rule3, rows_of, rosters, positions, decisions, refused, candidat
             routes += combines_onto(groups[0])
             stop(f"final check: two Understat ids {ids} on FBref id {key[2]} in {key[0]} {key[1]}: Understat id {understat_id} is named in no merge_ids row with the others, and {' and '.join(routes) or 'a ' + links[groups[0]][0] + ' link'} put it there.")
 
+    # The report lists only the ids still on that FBref id after every row (D49).
+    merged_on_id = [(key, on_id) for key, ids in merged_collisions for on_id in [[found for found in ids if found in collisions_now.get(key, ())]] if len(on_id) > 1]
     pool = pool_of(candidates_after, flags)
     finished = rule3._replace(final=links, guard=guard, pair_of=pair_of, name_map_rows=+name_map_rows, matches_of=+matches_of, anchor_guard=anchor_guard, anchor_pair_of=anchor_pair_of, anchor_rows=+anchor_rows, anchor_matches=+anchor_matches)
     joined_before, joined_after = (sum(rows_of[group] for group in stage) for stage in (rule3.final, links))
     return JoinResult(
         finished, positions, candidates_after, flags, pool, partial, len(pool_of(candidates, flags_before)), len(pool), joined_before, joined_after,
-        {key: ids for key, ids in rule3.collisions.items() if key not in merged and key not in settled and not set(ids) <= decided[key]}, merge_rows, merged_collisions, anchors_removed, cross_season_cases,
+        {key: ids for key, ids in rule3.collisions.items() if key not in {restored for restored, _ in merged_collisions} and key not in settled and not set(ids) <= decided[key]}, merge_rows, merged_on_id, anchors_removed, cross_season_cases,
         [(league, year, new_id) for (league, year, _), new_id in sorted(combine.items()) if (league, year, new_id) not in set(candidates_after)], list(refused), unjoined_listed,
     )

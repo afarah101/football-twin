@@ -6,8 +6,11 @@ goes in tests/fixtures/. Run from the repo root: python3 -m unittest discover te
 import contextlib
 import html
 import io
+import os
+import random
 import sys
 import unittest
+from collections import Counter
 from functools import lru_cache
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -1964,6 +1967,46 @@ class StageDReviewDecisions(unittest.TestCase):
         rows = [decision("name_map", "ESP|2021|1|Kike|x", "merge_ids", "x"), decision("player_season", "ESP|2021|c", "link_to", "x")]
         self.assert_third_id_stops("link_to on player_season ESP|2021|c to x", rows_of=rows_of, rosters=rosters, decisions=rows, refused=refused)
 
+    def test_d_synthetic_merge_ids_row_off_a_collision_does_not_restore_it(self):
+        # synthetic: 0 real rows. D49: the row's own Understat id, 3, is not in the collision of 1 and 2 on x, so the row neither restores nor names it.
+        rows_of = {hand_group("m1"): 10, hand_group("m2", 2): 10, hand_group("m3", 3, "Paco"): 10}
+        rosters = {("m1", "A"): hand_roster(("x", "Kike")), ("m2", "A"): hand_roster(("x", "Kike")), ("m3", "A"): hand_roster(("y", "Pablo Paco"), ("x", "Xavi"))}
+        merge = decision("name_map", "ESP|2021|3|Paco|y", "merge_ids", "x")
+        # So the row merges no second id, and the merges-on run stops on that.
+        self.assert_stops("merge_ids on ('ESP', 2021, 'x') puts no second Understat id", rows_of=rows_of, rosters=rosters, decisions=[merge])
+        # The merges-off run passes over that stop (D21): Understat 3 alone moves to x, and 1 and 2 stay out and listed.
+        result = hand_run(rows_of, rosters, [merge], merges_on=False)
+        self.assertEqual(sorted((group.understat_id, link[1]) for group, link in result.rule3.final.items()), [(3, "x")])
+        self.assertEqual(result.merged_collisions, [])
+        self.assertEqual(result.collisions, {("ESP", 2021, "x"): [1, 2]})
+        # A third id beside the restored-looking collision cannot ride on it: `approve` on 1 and 2 with the row stops on D48 in both runs.
+        approves = [merge, decision("name_map", "ESP|2021|1|Kike|x", "approve"), decision("name_map", "ESP|2021|2|Kike|x", "approve")]
+        for merges_on in (True, False):
+            with self.subTest("approve beside it", merges_on=merges_on):
+                self.assert_stops("final check", "FBref id x", "[1, 2, 3]", "Understat id 1", rows_of=rows_of, rosters=rosters, decisions=approves, merges_on=merges_on)
+
+    def test_d_synthetic_holder_whose_link_is_gone_is_not_named(self):
+        # synthetic: 0 real rows. D49: the `reject` takes Understat 1's rule 3 link off x, so 1 is no longer the id rule 3 holds there, and the `link_to` brings it back beside 2 and 4 with no merge_ids row naming it.
+        rows_of = {hand_group("m1"): 1, hand_group("m4", name="Enrique"): 40, hand_group("m2", 2, "Bruno"): 10, hand_group("m5", 4, "Paco"): 10}
+        rosters = {("m1", "A"): hand_roster(("x", "Pablo Kike")), ("m4", "A"): hand_roster(("x", "Xavi")), ("m2", "A"): hand_roster(("x", "Xavi")), ("m5", "A"): hand_roster(("x", "Xavi"))}
+        rows = [decision("name_map", "ESP|2021|1|Kike|x", "reject"), decision("partial_join", "ESP|2021|1", "link_to", "x"), decision("partial_join", "ESP|2021|2", "merge_ids", "x")]
+        for label, extra, ids in (("two ids", [], "[1, 2]"), ("three ids", [decision("partial_join", "ESP|2021|4", "merge_ids", "x")], "[1, 2, 4]")):
+            for merges_on in (True, False):
+                with self.subTest(label, merges_on=merges_on):
+                    self.assert_stops("final check", "FBref id x", ids, "Understat id 1", "link_to on partial_join ESP|2021|1", rows_of=rows_of, rosters=rosters, decisions=[*rows, *extra], merges_on=merges_on)
+
+    def test_d_synthetic_merged_collisions_lists_only_ids_on_the_id(self):
+        # synthetic: 0 real rows. D49: Understat 3 leaves x, by `reject` or by `link_to`, so the report lists only 1 and 2.
+        rows_of = {hand_group("m1"): 10, hand_group("m2", 2): 10, hand_group("m3", 3): 10}
+        rosters = {("m1", "A"): hand_roster(("x", "Kike")), ("m2", "A"): hand_roster(("x", "Kike")), ("m3", "A"): hand_roster(("x", "Kike"), ("y", "Tom"))}
+        merge = decision("name_map", "ESP|2021|1|Kike|x", "merge_ids", "x")
+        for label, third, on_y in (("reject", decision("name_map", "ESP|2021|3|Kike|x", "reject"), []), ("link_to", decision("name_map", "ESP|2021|3|Kike|x", "link_to", "y"), [(3, "y")])):
+            for merges_on in (True, False):
+                with self.subTest(label, merges_on=merges_on):
+                    result = hand_run(rows_of, rosters, [merge, third], merges_on=merges_on)
+                    self.assertEqual(sorted((group.understat_id, link[1]) for group, link in result.rule3.final.items()), [(1, "x"), (2, "x"), *on_y])
+                    self.assertEqual(result.merged_collisions, [(("ESP", 2021, "x"), [1, 2])])
+
     def test_d_synthetic_reject_on_an_id_holds_only_player_seasons_it_reaches(self):
         # synthetic: 0 real rows. Both of the player-season's groups move from y to z, so `reject` on y says nothing about z.
         y, z = ("ESP", 2022, "y"), ("ESP", 2022, "z")
@@ -2007,6 +2050,196 @@ class StageDReviewDecisions(unittest.TestCase):
 
         pairs, kept_rows = keep_line([])
         self.assertEqual(keep_line([decision("name_map", join.decision_key(pair), "reject")]), [pairs - 1, kept_rows - rows])
+
+
+GENERATED_IDS = "abcdefgh"
+PLAIN_IDS = {fbref_id: fbref_id for fbref_id in GENERATED_IDS}
+
+
+def generated_case(rnd):
+    """One hand-made league-season: FBref rows (match, club, name, id, minutes), shot groups (match, Understat id, name, club, rows) and season rows. Only the property test uses it."""
+    ids = rnd.sample(GENERATED_IDS, 6)
+    p, p2, w, c, q, t = ids
+    positions, groups = [], []
+    first = rnd.choice(["Kike", "Kike", "Kike Garcia"])
+    minutes = lambda: rnd.choice([0, 30, 90, 300, 500, 700])
+    for match in ("m0", "m1"):
+        positions.append((match, "A", first, p, minutes()))
+        groups.append((match, 1, "Kike", "A", rnd.choice([1, 40])))
+    positions.append(("m2", "A", "Kike Garcia", rnd.choice([p, p, c]), minutes()))
+    if rnd.random() < 0.7:
+        positions.append(("m2", "A", "Kike Lopez", w, minutes()))
+    groups.append(("m2", 1, "Kike", "A", rnd.choice([1, 40, 98])))
+    if rnd.random() < 0.3:
+        positions.append(("m3", "A", "Kike Garcia", rnd.choice([p, c]), minutes()))
+        groups.append(("m3", 1, "Kike", "A", 1))
+    if rnd.random() < 0.35:
+        positions.append(("m4", "A", first, rnd.choice([p, p2, c]), minutes()))
+        groups.append(("m4", 2, rnd.choice(["Kike", "Enrique"]), "A", 1))
+    if rnd.random() < 0.35:
+        # A third Understat id, exact or on a map link, beside the ids a row may combine or merge.
+        positions.append(("m7", "A", rnd.choice(["Paco", "Pablo Paco"]), rnd.choice([p, c, q, t]), minutes()))
+        groups.append(("m7", 3, "Paco", "A", rnd.choice([1, 40])))
+    if rnd.random() < 0.3:
+        # A fourth Understat id that no name step joins, so it has a partial_join key.
+        positions.append(("m8", "A", "Xavi", rnd.choice([p, c]), minutes()))
+        groups.append(("m8", 4, "Bruno", "A", rnd.choice([1, 10])))
+    if rnd.random() < 0.5:
+        positions.append(("m5", "A", first, p2, minutes()))
+        groups.append(("m5", rnd.choice([1, 1, 2]), "Kike", "A", rnd.choice([1, 5])))
+    if rnd.random() < 0.4:
+        # Unjoined rows of Understat 1, the usual holder of p.
+        positions.append(("m6", "A", "Zed", rnd.choice([w, c, p]), minutes()))
+        groups.append(("m6", 1, "Kike", "A", rnd.choice([1, 40])))
+    for number, fbref_id in enumerate((w, c, q, t)):
+        positions.append((f"n{number}", rnd.choice("AB"), rnd.choice(["Carlos", "Dan", "Xav"]), fbref_id, minutes()))
+    seasons = rnd.choice([{"Kike": [("A", 900)]}, {"Kike": [("A", 900)]}, {"Kike": [("A", 150)]}, {"Kike": [("A", 900), ("B", 2000)]}, {"Dan": [("B", 700)], "Xav": [("Q", 200)]}])
+    return ids, positions, groups, seasons
+
+
+def generated_frames(case, rename):
+    _, positions, groups, seasons = case
+    raw = fbref_rows(*[(match, "2022-01-10", "A", "B", club, name, rename[fbref_id], minutes) for match, club, name, fbref_id, minutes in positions]).assign(Season_End_Year=2022)
+    shots = pd.DataFrame([("ESP", 2021, understat_id, name) for _, understat_id, name, _, _ in groups], columns=["league", "season", "player_id", "player"]).drop_duplicates()
+    rows_of = {hand_group(match, understat_id, name, club): rows for match, understat_id, name, club, rows in groups}
+    season_rows = {("ESP", 2021, name): [join.SeasonRow({club}, total) for club, total in found] for name, found in seasons.items()}
+    return raw, shots, rows_of, season_rows
+
+
+def generated_rule3(positions, shots, rows_of, season_rows):
+    facts = join.guard_facts(positions, shots, season_rows)
+    return join.rule3_links(rows_of, join.build_rosters(positions), facts), facts
+
+
+def generated_rows(rnd, case, merged_only):
+    """1 to 5 review rows, on keys rule 3 made in the merged run, or in either run."""
+    ids = case[0]
+    raw, shots, rows_of, season_rows = generated_frames(case, PLAIN_IDS)
+    rows, seen = [], set()
+    for positions in (join.merge_fbref_ids(raw)[0],) + (() if merged_only else (raw,)):
+        rule3, _ = generated_rule3(positions, shots, rows_of, season_rows)
+        on_roster = sorted(set(positions["fbref_id"]))
+        keys = [("link", key) for key in join.link_items(rule3)] * 3
+        keys += [("partial", join.partial_join_key(key)) for key, (found, total) in join.join_counts(rows_of, rule3.final).items() if found < total]
+        keys += [("season", f"ESP|2021|{fbref_id}") for fbref_id in ids] * 2
+        for _ in range(rnd.randint(1, 3 if merged_only else 5)):
+            kind, key = rnd.choice(keys)
+            if kind == "link":
+                item_type, key = key
+                verdict = rnd.choice(["approve", "reject", "reject", "link_to", "merge_ids"])
+            elif kind == "partial":
+                item_type, verdict = "partial_join", rnd.choice(["approve", "reject", "reject", "link_to", "merge_ids"])
+            else:
+                item_type, verdict = "player_season", rnd.choice(["link_to", "link_to", "link_to", "reject", "approve"])
+            fbref_id = rnd.choice(on_roster if merged_only else ids) if verdict in ("link_to", "merge_ids") else ""
+            if (item_type == "player_season" and fbref_id == key.split("|")[2]) or (item_type, key) in seen:
+                continue
+            seen.add((item_type, key))
+            rows.append((item_type, key, verdict, fbref_id))
+    return rows
+
+
+def generated_run(case, rows, rename, merges_on, order=None):
+    """Stage D on the generated case, with its FBref ids renamed. Adds a cross_season_ids row when the run asks for one."""
+    raw, shots, rows_of, season_rows = generated_frames(case, rename)
+    merged, merges, refused = join.merge_fbref_ids(raw)
+    keyed = sorted({key.split("|")[2] for item_type, key, _, _ in rows if item_type == "player_season"})
+    # A refused partner gives each player_season key a key, while its id is still there after the merges.
+    refused = [*refused, *(join.RefusedMerge("ESP", 2022, f"N{number}", (rename[fbref_id], f"o{number}"), "x") for number, fbref_id in enumerate(keyed) if rename[fbref_id] in set(merged["fbref_id"]))]
+    positions = merged if merges_on else raw
+    rule3, facts = generated_rule3(positions, shots, rows_of, season_rows)
+    decisions = []
+    for item_type, key, verdict, fbref_id in rows:
+        parts = key.split("|")
+        if item_type != "partial_join":
+            parts[-1] = rename[parts[-1]]
+        decisions.append(decision(item_type, "|".join(parts), verdict, rename[fbref_id] if fbref_id else ""))
+    if order:
+        order.shuffle(decisions)
+    candidates_of = lambda found: sorted(set(zip(found["league"], found["Season_End_Year"], found["fbref_id"])))
+    for _ in range(3):
+        try:
+            return rule3, join.finish_join(rule3, rows_of, join.build_rosters(positions), positions, decisions, refused, candidates_of, facts, merges_on), positions, decisions, merges, rows_of
+        except SystemExit as stopped:
+            if "the run needs a cross_season_ids row" not in str(stopped):
+                break
+            decisions = [*decisions, decision("cross_season_ids", str(stopped).split("Understat id ")[1].split(" ")[0], "approve")]
+    return rule3, None, positions, decisions, merges, rows_of
+
+
+def generated_result(result, back):
+    """What the property test compares, with FBref ids renamed back."""
+    if result is None:
+        return "stop"
+    name = lambda fbref_id: back.get(fbref_id, fbref_id)
+    return (
+        sorted((group.match, group.understat_id, group.name, link[0], name(link[1])) for group, link in result.rule3.final.items()), sorted(result.partial.items()),
+        sorted(name(key[2]) for key in result.pool), sorted((name(key[2]), sorted(found)) for key, found in result.flags.items()),
+        sorted((group.match, group.understat_id) for group in result.anchors_removed), sorted(result.unjoined_listed), sorted((name(key[2]), ids) for key, ids in result.merged_collisions),
+    )
+
+
+def broken_review_rules(rule3, result, positions, decisions, rows_of):
+    """The rules the property test holds, worked out from the rows and rule 3's output, not from finish_join's own sets."""
+    final, items, broken = result.rule3.final, join.link_items(rule3), []
+    partial_keys = {join.partial_join_key(key): key for key, (found, total) in join.join_counts(rows_of, rule3.final).items() if found < total}
+    on_roster = set(positions["fbref_id"])
+    # The merges-off run passes over a row whose key or id is not in its data (D21), so only the rows it kept count.
+    kept = [row for row in decisions if ((row["item_type"], row["key"]) in items if row["item_type"] in join.LINK_ITEM_TYPES else row["key"] in partial_keys if row["item_type"] == "partial_join" else True) and (not row["fbref_id"] or row["fbref_id"] in on_roster)]
+    rejected = {group for row in kept if row["decision"] == "reject" and row["item_type"] in join.LINK_ITEM_TYPES for group in items[(row["item_type"], row["key"])]}
+    left_unjoined = {partial_keys[row["key"]] for row in kept if row["decision"] == "reject" and row["item_type"] == "partial_join"}
+    for group in final:
+        if group in rejected or (group.player_season in left_unjoined and group not in rule3.final):
+            broken.append(f"a row a reject left unjoined is in final: {group}")
+    # One league-season only, so an FBref id is the whole key.
+    merge_rows = [row for row in kept if row["decision"] == "merge_ids"]
+    for key, ids in join.id_collisions(final).items():
+        on_id = [row for row in merge_rows if row["fbref_id"] == key[2]]
+        named = {int(row["key"].split("|")[2]) for row in on_id}
+        named |= {group.understat_id for group, link in rule3.final.items() if link[1] == key[2] and group in final and final[group][1] == key[2]}
+        collided = rule3.collisions.get(key, [])
+        if any(row["item_type"] in join.LINK_ITEM_TYPES and int(row["key"].split("|")[2]) in collided for row in on_id):
+            named |= set(collided)
+        if set(ids) - named:
+            broken.append(f"FBref id {key[2]} holds Understat ids {sorted(set(ids) - named)} that no merge_ids row names")
+    return broken
+
+
+class StageDGeneratedCases(unittest.TestCase):
+    def test_d_synthetic_review_rules_hold_on_generated_cases(self):
+        # synthetic: 0 real cases for most of these rules, so the cases are generated. PLAYER_JOIN_CASES sets how many (default 60), PLAYER_JOIN_SEED the seed.
+        # shortcut: a seeded loop, not hypothesis, which is not in requirements.txt. It does not shrink a failing case, so a failure prints the whole case. Upgrade if the repo takes hypothesis.
+        cases, seed = int(os.environ.get("PLAYER_JOIN_CASES", "60")), int(os.environ.get("PLAYER_JOIN_SEED", "1"))
+        rnd, broken, counts = random.Random(seed), [], Counter()
+        for number in range(cases):
+            case = generated_case(rnd)
+            rows = generated_rows(rnd, case, merged_only=number % 2 == 0)
+            plain_left = set(join.merge_fbref_ids(generated_frames(case, PLAIN_IDS)[0])[0]["fbref_id"])
+            for merges_on in (True, False):
+                label = f"seed {seed} case {number}, merges {'on' if merges_on else 'off'}, case {case}, rows {rows}"
+                rule3, result, positions, decisions, merges, rows_of = generated_run(case, rows, PLAIN_IDS, merges_on)
+                counts[("ran" if result else "stopped", merges_on)] += 1
+                if result:
+                    broken += [f"{label}: {rule}" for rule in broken_review_rules(rule3, result, positions, decisions, rows_of)]
+                if generated_result(generated_run(case, rows, PLAIN_IDS, merges_on, order=rnd)[1], {}) != generated_result(result, {}):
+                    broken.append(f"{label}: row order changes the result")
+                for _ in range(2):
+                    shuffled = list(GENERATED_IDS)
+                    rnd.shuffle(shuffled)
+                    rename = dict(zip(GENERATED_IDS, shuffled))
+                    # A merge picks its survivor by sort order only on equal minutes (stage A), so those cases cannot compare.
+                    if any(merge.equal_minutes for merge in merges) or {rename[fbref_id] for fbref_id in plain_left} != set(join.merge_fbref_ids(generated_frames(case, rename)[0])[0]["fbref_id"]):
+                        counts["rename skipped"] += 1
+                        continue
+                    counts["renames compared"] += 1
+                    if generated_result(generated_run(case, rows, rename, merges_on)[1], {new: old for old, new in rename.items()}) != generated_result(result, {}):
+                        broken.append(f"{label}: result depends on how ids sort, renamed {rename}")
+        if os.environ.get("PLAYER_JOIN_REPORT"):
+            print(f"\n{cases} cases, seed {seed}: {dict(counts)}, {len(broken)} broken", file=sys.stderr)
+        self.assertEqual(broken[:3], [], f"{len(broken)} broken")
+        # The rules must have been checked on runs that finished, on both runs.
+        self.assertGreater(counts[("ran", True)], 0)
+        self.assertGreater(counts[("ran", False)], 0)
 
 
 class MovedFromTheOldTestFile(unittest.TestCase):
