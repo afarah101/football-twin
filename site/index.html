@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Football Twin</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>Football Twin</h1>
+  <p class="line">Matches how they shoot and create, not how they move.</p>
+</header>
+<main>
+  <section aria-labelledby="search-label">
+    <label id="search-label" for="search">Search a player</label>
+    <input id="search" type="search" autocomplete="off" placeholder="Player name">
+    <div id="results" role="list"></div>
+    <p id="status" role="status"></p>
+  </section>
+  <section id="player" hidden aria-live="polite">
+    <h2 id="player-name"></h2>
+    <p id="player-meta"></p>
+    <h3>Fingerprint</h3>
+    <div id="fingerprint-box"></div>
+    <h3>Display stats</h3>
+    <div id="display-stats-box"></div>
+    <h3>Twins</h3>
+    <p class="label">style twin, not level twin</p>
+    <label class="filter"><input id="same-league" type="checkbox"> Same league only</label>
+    <ol id="twins"></ol>
+    <button id="show-more" type="button" hidden>Show more</button>
+  </section>
+</main>
+<footer>
+  <p>Data to 2023/24</p>
+  <p>Shot and xG data: <a href="https://understat.com">Understat</a></p>
+  <p>Takedown contact: [TO BE ADDED BEFORE LAUNCH]</p>
+</footer>
+<script src="app.js"></script>
+</body>
+</html>

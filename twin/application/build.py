@@ -5,7 +5,7 @@ on the validation report and out of these files (Q20).
 
 A public file is site or release output (D43). Only `write_public_files` writes one, and it fails the run unless the source
 may publish (D34). A source that may not, such as the stand-in, writes the same format into `build/private/`.
-Usage: python3 -m twin.application.build  (the stand-in run, into build/private/)
+Usage: python3 -m twin.application.build  (the stand-in run, into build/private/, and its site into build/private/site/)
 """
 import json
 from pathlib import Path
@@ -75,7 +75,10 @@ def run(loaded, build_root=BUILD):
 
 
 if __name__ == "__main__":
+    from twin.application.site_data import write_site
     from twin.infrastructure.standin.loader import StandinLoader
 
-    for path in run(StandinLoader().load()):
+    paths = run(StandinLoader().load())
+    for path in paths:
         print(path.relative_to(BUILD.parent))
+    print(write_site(paths).relative_to(BUILD.parent))
