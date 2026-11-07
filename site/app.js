@@ -22,13 +22,14 @@ const files = new Map();
 let names = [];
 let current = null;
 let showAll = false;
+let lastPick = null;  // the last season clicked: only it may render, so a slow earlier file never overwrites it
 
 const byId = (id) => document.getElementById(id);
 const fold = (text) => text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
 const seasonLabel = (season) => `${season}/${String((season + 1) % 100).padStart(2, "0")}`;
 const minutesLabel = (minutes) => `${minutes.toLocaleString("en-GB")} min`;
 // Rounded down, so "closer than" never overstates.
-const closenessLabel = (closeness) => `closer than ${(Math.floor(closeness * 10) / 10).toFixed(1)}% of all pairs`;
+const closenessLabel = (closeness, sameLeague) => `closer than ${(Math.floor(closeness * 10) / 10).toFixed(1)}% ${sameLeague ? "of same-league pairs" : "of all pairs"}`;
 
 async function readJson(path) {
   const response = await fetch(path);
@@ -79,10 +80,11 @@ function drawDisplayStats(stats) {
 
 function renderTwins() {
   const list = byId("twins");
-  const twins = current.entry.twins[byId("same-league").checked ? "same_league" : "all_leagues"];
+  const sameLeague = byId("same-league").checked;
+  const twins = current.entry.twins[sameLeague ? "same_league" : "all_leagues"];
   list.replaceChildren(...twins.slice(0, showAll ? STORED : SHOWN).map((twin) => {
     const item = document.createElement("li");
-    item.append(`${twin.name} · ${twin.league} ${seasonLabel(twin.season)} · ${minutesLabel(twin.minutes)} · ${closenessLabel(twin.closeness)}`);
+    item.append(`${twin.name} · ${twin.league} ${seasonLabel(twin.season)} · ${minutesLabel(twin.minutes)} · ${closenessLabel(twin.closeness, sameLeague)}`);
     if (twin.small_sample) item.append(" ", smallSampleFlag());
     return item;
   }));
@@ -105,15 +107,17 @@ function renderPlayer(content, entry) {
 }
 
 async function pick(found) {
+  lastPick = found;
   byId("status").textContent = "";
   try {
     if (!files.has(found.file)) files.set(found.file, await readJson(`data/${found.file}`));
+    if (lastPick !== found) return;
     const content = files.get(found.file);
     const entry = content.player_seasons.find((player) => player.player_id === found.player_id);
     if (!entry) throw new Error(`${found.name} is missing from ${found.file}`);
     renderPlayer(content, entry);
   } catch (error) {
-    byId("status").textContent = `Could not load this season: ${error.message}`;
+    if (lastPick === found) byId("status").textContent = `Could not load this season: ${error.message}`;
   }
 }
 

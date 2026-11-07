@@ -29,6 +29,7 @@ CREDIT = "Shot and xG data: Understat"  # Ahmed, 7 Nov 2026, with "Understat" li
 CREDIT_LINK = '<a href="https://understat.com">Understat</a>'
 TAKEDOWN = "Takedown contact: [TO BE ADDED BEFORE LAUNCH]"  # Ahmed, 7 Nov 2026: a placeholder until #13
 CLOSENESS = "of all pairs"  # issue #11: "closer than X% of all pairs"
+SAME_LEAGUE_CLOSENESS = "of same-league pairs"  # #11: the same-league list is ranked against same-league pairs
 SITE_TWIN_KEYS = {"player_id", "name", "league", "season", "minutes", "closeness", "small_sample"}
 
 
@@ -119,6 +120,7 @@ class SiteFiles(unittest.TestCase):
         self.assertIn(SMALL_SAMPLE, script)
         self.assertIn("closer than", script)
         self.assertIn(CLOSENESS, script)
+        self.assertIn(SAME_LEAGUE_CLOSENESS, script)
 
     def test_no_framework_and_no_distance_maths_in_the_browser(self):
         page, script = sample_site()["index.html"], sample_site()["app.js"]

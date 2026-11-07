@@ -62,6 +62,13 @@ class SiteSmoke(unittest.TestCase):
                         self.assertRegex(text, r"(ENG|ESP|FRA|GER|ITA) \d{4}/\d{2}")
                         self.assertRegex(text, r"[\d,]+ min")
                         self.assertRegex(text, r"closer than \d+(\.\d)?% of all pairs")
+                    # Same league only: the closeness is against same-league pairs, so the label says so.
+                    page.check("#same-league")
+                    expect(twins).to_have_count(5)
+                    for index in range(5):
+                        self.assertRegex(twins.nth(index).inner_text(), r"closer than \d+(\.\d)?% of same-league pairs")
+                    page.uncheck("#same-league")
+                    expect(twins.first).to_contain_text("of all pairs")
                     expect(page.locator("svg#fingerprint")).to_have_count(1)
                     expect(page.locator("svg#fingerprint rect.bar")).to_have_count(10)
                     expect(page.locator("svg#display-stats")).to_have_count(1)
@@ -76,6 +83,20 @@ class SiteSmoke(unittest.TestCase):
                     page.locator("#results button").first.click()
                     expect(page.locator("#player")).to_contain_text("Darwin Núñez")
                     expect(page.locator("#player")).to_contain_text(SMALL_SAMPLE)
+
+                    # Two fast season clicks: the first season's file lands last, the screen still shows the second.
+                    held = []
+                    page.route("**/data/ENG_2017.json", lambda route: held.append(route))
+                    page.reload()  # empties the page's file cache, so both seasons are fetched
+                    page.fill("#search", "salah")
+                    expect(results).to_have_count(2)
+                    results.filter(has_text="2017/18").click()
+                    results.filter(has_text="2023/24").click()
+                    meta = page.locator("#player-meta")
+                    expect(meta).to_contain_text("ENG 2023/24")
+                    held[0].continue_()
+                    page.wait_for_function("files.has('ENG_2017.json')")  # the late file is read and its render step ran
+                    expect(meta).to_contain_text("ENG 2023/24")
                     browser.close()
             finally:
                 server.shutdown()
