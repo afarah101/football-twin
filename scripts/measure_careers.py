@@ -60,7 +60,7 @@ def correlation_section(title, columns):
     lines = [f"**{title}**", ""] + table(["metric"] + short, [[short[i]] + [f"{matrix[i, j]:.2f}" for j in range(len(METRICS))] for i in range(len(METRICS))])
     pairs = [(METRICS[i], METRICS[j], matrix[i, j]) for i in range(len(METRICS)) for j in range(i + 1, len(METRICS)) if abs(matrix[i, j]) > CORRELATION_LIMIT]
     lines += ["", f"Pairs with |r| above {CORRELATION_LIMIT}: " + ("; ".join(f"{a} and {b}: {r:.3f}" for a, b, r in pairs) if pairs else "none")]
-    trio = ("xa_per_90", "key_passes_per_90", "xg_buildup_per_90")
+    trio = tuple(metric for metric in ("xa_per_90", "key_passes_per_90", "xg_buildup_per_90") if metric in METRICS)  # D30-2 dropped key passes
     lines.append("Decision 10 trio: " + "; ".join(f"{a} and {b}: {matrix[METRICS.index(a), METRICS.index(b)]:.3f}" for k, a in enumerate(trio) for b in trio[k + 1:]))
     return lines, pairs
 

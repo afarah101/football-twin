@@ -51,11 +51,20 @@ Source of every one: Ahmed, 7 Nov 2026, after `docs/reports/T30_measurements.md`
 - **D30-7.** Each stint keeps its own minutes. "Seasons covered" counts distinct seasons.
 - **D30-8.** Players under 6,000 minutes keep season twins, labelled "season twins".
 
-## Build choices in Part B1, for Ahmed to confirm
+## Build choices in Part B1
 
-No decision covers these. Each is a named shortcut in the code.
+No decision covered these in B1. D30-9 and D30-10 below settle them: same-role closeness changes, and the other three are accepted.
 
 - **Same-role closeness.** On the same-role list, closeness is measured against career pairs inside that role group, as the same-league season list uses same-league pairs (Ahmed, 6 Nov 2026). The all-roles list uses all career pairs (decision 3).
 - **Role group tie.** Two role groups with equal career minutes: the group of the latest Pool season wins. The full data holds 0 such ties (T30).
 - **Career name.** A career shows the name of its latest Pool PlayerSeason.
 - **Career methods.** Career lists are built for every Candidate method, as season lists are. The Basketball method stays on season lists for the validation report.
+
+## Owner decisions after Part B1
+
+Source of every one: Ahmed, 7 Nov 2026, given in the #30 Part B2 brief. Where one differs from a decision or choice above, this one wins.
+
+- **D30-9.** Career closeness is always measured against all career pairs, with the role filter on or off. Label: "closer than X% of all careers".
+- **D30-10.** Accept: a role tie goes to the latest season; a career shows its latest name; career lists exist for all 3 methods. The site shows Euclidean.
+- **D30-11.** No data file loaded for one player view may exceed 1 MB. Split careers.json as needed.
+- **D30-12.** Fingerprint labels in plain English. finishing shows as "Finishing (goals vs xG per shot)".

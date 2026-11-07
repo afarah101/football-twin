@@ -47,8 +47,9 @@ def plain_ranked(method, career, same_role):
     return sorted(others, key=lambda other: (round(plain_distance(method, career.values, other.values), twins.DISTANCE_DECIMALS), other.player_id))
 
 
-def plain_closeness(method, distance, role_group=None):
-    kept = [career for career in sample_careers() if role_group is None or career.role_group == role_group]
+def plain_closeness(method, distance):
+    """D30-9: against all career pairs, whatever the role filter."""
+    kept = sample_careers()
     pairs = [round(plain_distance(method, a.values, b.values), twins.DISTANCE_DECIMALS) for i, a in enumerate(kept) for b in kept[i + 1:]]
     return 100 * sum(1 for found in pairs if found > distance) / max(len(pairs), 1)
 
@@ -126,13 +127,20 @@ class CareerLists(unittest.TestCase):
                 crossed |= any(match.career.role_group != career.role_group for match in lists[career.player_id].all_roles)
         self.assertTrue(crossed)  # real: the all-roles lists do cross role groups
 
-    def test_closeness_uses_career_pairs_only(self):
+    def test_closeness_is_against_all_career_pairs_with_the_role_filter_on_or_off(self):
+        shared = 0
         for method, lists in sample_lists().items():
             for career in sample_careers():
-                for match in lists[career.player_id].all_roles:
+                found = lists[career.player_id]
+                for match in found.all_roles + found.same_role:
                     self.assertAlmostEqual(match.closeness, plain_closeness(method, match.distance), places=9)
-                for match in lists[career.player_id].same_role:
-                    self.assertAlmostEqual(match.closeness, plain_closeness(method, match.distance, career.role_group), places=9)
+                # D30-9: a twin on both lists shows the same closeness, so toggling the filter never moves it.
+                both = {match.career.player_id: match.closeness for match in found.all_roles}
+                for match in found.same_role:
+                    if match.career.player_id in both:
+                        self.assertEqual(match.closeness, both[match.career.player_id])
+                        shared += 1
+        self.assertTrue(shared)
 
 
 if __name__ == "__main__":

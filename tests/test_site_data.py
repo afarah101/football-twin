@@ -10,7 +10,9 @@ import json
 import re
 import sys
 import unittest
+from contextlib import contextmanager
 from functools import lru_cache
+from unittest import mock
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -19,6 +21,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests"))
 from test_build import loaded
 from twin.application import build, site_data
+from twin.domain import careers, profiles
 from twin.domain.pool import in_pool
 
 ON_SCREEN_LINE = "Matches how they shoot and create, not how they move."  # plan:9
@@ -31,10 +34,37 @@ TAKEDOWN = "Takedown contact: [TO BE ADDED BEFORE LAUNCH]"  # Ahmed, 7 Nov 2026:
 CLOSENESS = "of all pairs"  # issue #11: "closer than X% of all pairs"
 SAME_LEAGUE_CLOSENESS = "of same-league pairs"  # #11: the same-league list is ranked against same-league pairs
 SITE_TWIN_KEYS = {"player_id", "name", "league", "season", "minutes", "closeness", "small_sample"}
+CAREER_CLOSENESS = "of all careers"  # D30-9
+SEASON_TWINS = "Season twins"  # D30-8
+SAME_ROLE = "Same role only"  # #30 decision 7, D30-5
+FINISHING_LABEL = "Finishing (goals vs xG per shot)"  # D30-12
+SEASONS_COVERED = "Seasons covered: "  # #30 decision 6
+HOW_IT_WORKS = (  # #30 decision 11, with the D30-1 bar
+    "How it works",
+    "compared with the other attackers in the same league and season",
+    "averaged over the career, weighted by minutes played",
+    "nearest match",
+    "Attacking style only",
+    "Data 2017/18-2023/24",
+    "Careers need 6,000+ minutes",
+)
+CAREER_BAR = 900  # the cut sample holds no 6,000-minute career, so tests lower the bar to the Pool's 900, as in B1
+CAREER_FILE_KEYS = {"player_id", "name", "role_group", "first_season", "last_season", "season_count", "minutes", "metrics", "percentiles", "player_seasons", "twins"}
+CAREER_TWIN_KEYS = {"player_id", "name", "role_group", "first_season", "last_season", "season_count", "minutes", "closeness"}
 
 
-def site_of(source):
-    """The Build, then the site, into a temporary build folder: {path under the site folder: text}."""
+@contextmanager
+def career_bar(minutes):
+    """The Build with a lower career bar. Real sample records only; just the bar moves."""
+    with mock.patch.object(build, "career_profiles", lambda groups: careers.career_profiles(groups, career_minutes=minutes)), mock.patch.object(build, "CAREER_MINUTES", minutes):
+        yield
+
+
+def site_of(source, bar=None):
+    """The Build, then the site, into a temporary build folder: {path under the site folder: text}. `bar` lowers the career bar."""
+    if bar is not None:
+        with career_bar(bar):
+            return site_of(source)
     with TemporaryDirectory() as folder:
         paths = build.run(source, Path(folder))
         site = site_data.write_site(paths, Path(folder) / "private" / "site")
@@ -46,12 +76,22 @@ def sample_site():
     return site_of(loaded())
 
 
-def names():
-    return json.loads(sample_site()["data/names.json"])
+@lru_cache(maxsize=None)
+def career_site():
+    return site_of(loaded(), CAREER_BAR)
 
 
-def data_files():
-    return {path: json.loads(text) for path, text in sample_site().items() if path.startswith("data/") and path != "data/names.json"}
+def names(site=sample_site):
+    return json.loads(site()["data/names.json"])
+
+
+def data_files(site=sample_site):
+    """The league-season files."""
+    return {path: json.loads(text) for path, text in site().items() if path.startswith("data/") and path != "data/names.json" and not path.startswith("data/careers/")}
+
+
+def career_files(site=career_site):
+    return {path: json.loads(text) for path, text in site().items() if path.startswith("data/careers/")}
 
 
 class NameIndex(unittest.TestCase):
@@ -109,6 +149,68 @@ class TwinsData(unittest.TestCase):
                 self.assertEqual(entry["small_sample"], entry["minutes"] < site_data.SMALL_SAMPLE_MINUTES)
 
 
+class CareerData(unittest.TestCase):
+    def test_names_and_season_files_say_which_players_have_a_career(self):
+        # Real: at 6,000 minutes no sample player has a career, so every search opens season twins (D30-8).
+        self.assertEqual({entry["career"] for entry in names()}, {False})
+        self.assertEqual(career_files(sample_site), {})
+        self.assertEqual({entry["career"] for content in data_files().values() for entry in content["player_seasons"]}, {False})
+        # At the Pool's 900 minutes every Pool player has one, with one file each.
+        self.assertEqual({entry["career"] for entry in names(career_site)}, {True})
+        self.assertEqual(set(career_files()), {f"data/careers/{entry['player_id']}.json" for entry in names(career_site)})
+        self.assertEqual({entry["career"] for content in data_files(career_site).values() for entry in content["player_seasons"]}, {True})
+
+    def test_career_file_holds_the_site_method_lists_and_percentiles(self):
+        found = careers.career_profiles(profiles.peer_group_profiles(loaded().player_seasons, loaded().shots), career_minutes=CAREER_BAR)
+        lists = careers.career_lists(found)[site_data.SITE_METHOD]  # D30-10: the site shows Euclidean
+        percentiles = careers.career_percentiles(found)
+        seasons = data_files(career_site)
+        for career in found:
+            content = career_files()[f"data/careers/{career.player_id}.json"]
+            self.assertEqual(set(content), CAREER_FILE_KEYS)
+            self.assertEqual((content["name"], content["role_group"], content["minutes"], content["season_count"]), (career.name, career.role_group, career.minutes, career.season_count))
+            self.assertEqual(content["metrics"], list(profiles.METRICS))
+            self.assertEqual(content["percentiles"], dict(zip(profiles.METRICS, percentiles[career.player_id])))
+            self.assertNotIn("distance", json.dumps(content))
+            for kind in ("all_roles", "same_role"):
+                self.assertEqual([twin["player_id"] for twin in content["twins"][kind]], [match.career.player_id for match in getattr(lists[career.player_id], kind)])
+                for twin in content["twins"][kind]:
+                    self.assertEqual(set(twin), CAREER_TWIN_KEYS)
+            # Each season link opens a league-season file that lists this player.
+            for season in content["player_seasons"]:
+                self.assertIn(career.player_id, {entry["player_id"] for entry in seasons[f"data/{season['file']}"]["player_seasons"]})
+        salah = career_files()["data/careers/e342ad68.json"]
+        self.assertEqual((salah["first_season"], salah["last_season"], salah["minutes"], salah["role_group"]), (2017, 2023, 3611, "Wide"))
+
+    def test_closeness_is_the_same_on_both_career_lists(self):
+        # D30-9: against all career pairs, so a twin on both lists keeps its closeness when the filter toggles.
+        shared = 0
+        for content in career_files().values():
+            both = {twin["player_id"]: twin["closeness"] for twin in content["twins"]["all_roles"]}
+            for twin in content["twins"]["same_role"]:
+                if twin["player_id"] in both:
+                    self.assertEqual(twin["closeness"], both[twin["player_id"]])
+                    shared += 1
+        self.assertTrue(shared)
+
+    def test_every_data_file_is_at_most_1_mb(self):
+        # D30-11. The full-data sizes are in the #30 B2 report; this guards the rule on every run.
+        self.assertEqual(site_data.MAX_DATA_BYTES, 1_000_000)
+        for site in (sample_site, career_site):
+            for path, text in site().items():
+                if path.startswith("data/"):
+                    self.assertLessEqual(len(text.encode("utf8")), site_data.MAX_DATA_BYTES, path)
+
+    def test_synthetic_a_data_file_over_1_mb_fails_the_run(self):
+        # Synthetic, plain numbers: no real data file comes near 1 MB, so the guard is reached with a hand-made value.
+        with TemporaryDirectory() as folder:
+            path = Path(folder) / "big.json"
+            with self.assertRaises(SystemExit) as stopped:
+                site_data.write_json(path, ["x" * 1000] * 1000)
+            self.assertIn("big.json", str(stopped.exception))
+            self.assertFalse(path.exists())
+
+
 class SiteFiles(unittest.TestCase):
     def test_every_on_screen_text_from_the_spec_is_in_the_site(self):
         page = sample_site()["index.html"]
@@ -121,6 +223,11 @@ class SiteFiles(unittest.TestCase):
         self.assertIn("closer than", script)
         self.assertIn(CLOSENESS, script)
         self.assertIn(SAME_LEAGUE_CLOSENESS, script)
+        for text in (CAREER_CLOSENESS, FINISHING_LABEL, SEASONS_COVERED):
+            self.assertIn(text, script)
+        for text in (SEASON_TWINS, SAME_ROLE) + HOW_IT_WORKS:
+            self.assertIn(text, page)
+        self.assertNotIn("Key passes", script)  # D30-2
 
     def test_no_framework_and_no_distance_maths_in_the_browser(self):
         page, script = sample_site()["index.html"], sample_site()["app.js"]

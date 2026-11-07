@@ -2,9 +2,8 @@
 
 A CareerProfile is the minutes-weighted mean of the person's season MetricProfiles, each stint with its own minutes and its
 own PeerGroup z-scores (decisions 1 and 8, D30-7). Only a person with 6,000+ career minutes has one (D30-1). Its role group
-is the one with the most career minutes (D30-4). Career closeness uses career pairs only (decision 3): all career pairs on
-the all-roles list, and career pairs inside the role group on the same-role list, as the same-league season list does.
-The role filter is the only career filter (D30-5). Percentiles for the Fingerprint are among all careers (D30-6).
+is the one with the most career minutes (D30-4). Career closeness is against all career pairs (decision 3), on both lists,
+so a twin keeps its closeness when the role filter toggles (D30-9). The role filter is the only career filter (D30-5). Percentiles for the Fingerprint are among all careers (D30-6).
 """
 from collections import defaultdict
 from dataclasses import dataclass
@@ -44,7 +43,7 @@ class CareerProfile:
 class CareerMatch:
     career: CareerProfile
     distance: float
-    closeness: float  # percent of the list's reference career pairs that are farther apart
+    closeness: float  # percent of all career pairs that are farther apart (D30-9)
 
 
 @dataclass(frozen=True)
@@ -107,12 +106,10 @@ def career_lists(careers):
     groups = np.array([career.role_group for career in careers])
     positions = np.arange(len(careers))
     pairs = np.triu(np.ones((len(careers), len(careers)), dtype=bool), k=1)
-    role_pairs = {group: pairs & (groups[:, None] == group) & (groups[None, :] == group) for group in sorted(set(groups))}
     found = {}
     for method in CANDIDATE_METHODS:
         distances = np.round(distance_matrix(vectors, method), DISTANCE_DECIMALS)
         reference = np.sort(distances[pairs])
-        role_reference = {group: np.sort(distances[mask]) for group, mask in role_pairs.items()}
         lists = {}
         for row, career in enumerate(careers):
             order = np.lexsort((positions, distances[row]))
@@ -120,7 +117,7 @@ def career_lists(careers):
             same = order[groups[order] == groups[row]]
             lists[career.player_id] = CareerLists(
                 career_matches(careers, distances[row], order[:TOP], reference),
-                career_matches(careers, distances[row], same[:TOP], role_reference[groups[row]]),
+                career_matches(careers, distances[row], same[:TOP], reference),
             )
         found[method] = lists
     return found
