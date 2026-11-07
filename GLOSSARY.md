@@ -1,6 +1,6 @@
 # Football Twin
 
-Finds players whose seasons look statistically alike in how they shoot and create.
+Finds players whose seasons look statistically alike in how they shoot and create. A second bounded context, Claim Check, tests football claims against the same data. Its words are in the Claim Check section at the end.
 
 ## Language
 
@@ -159,3 +159,149 @@ _Avoid_: Override, manual fix
 **Shot gap**:
 The absolute difference between a PlayerSeason's season totals shots and its shot rows minus own goals. A gap over 3 needs a review decision. A non-zero gap is `unexplained` until Ahmed's review gives its cause.
 _Avoid_: Shot error, mismatch
+
+## Claim Check
+
+Tests a football claim against the data and returns one of four verdicts, each traced to written thresholds and computed numbers.
+
+### Claims
+
+**Claim**:
+One sentence about football that a reader wants checked, typed in or taken from a headline.
+_Avoid_: Statement, assertion, query
+
+**ClaimQuery**:
+The fixed form a Claim is parsed into: subject, metric, window and peer group. Every check runs on a ClaimQuery, never on the Claim's wording.
+_Avoid_: Parsed claim, intent
+
+**Subject**:
+What a Claim is about: a player, a team or a league.
+_Avoid_: Entity, target
+
+### Verdicts
+
+**Verdict**:
+The answer to a Claim: Supported, Mixed, Not supported, or Can't check with this data.
+_Avoid_: Rating, score, result
+
+**Can't check with this data**:
+The Verdict when the data cannot answer the ClaimQuery. It always gives a reason, such as "subject type not covered".
+_Avoid_: Unknown, false, unverifiable
+
+### Seasons
+
+**Window**:
+The seasons a ClaimQuery covers, always inside the seasons the data holds. A Claim's tense or named seasons set it.
+_Avoid_: Period, timeframe, date range
+
+**Pooled metric**:
+A metric whose main Verdict counts every shot in the Window as one sample, because a single season is too noisy. Each season is shown as context only.
+_Avoid_: Career metric, aggregate
+
+### Metrics
+
+**Claim type**:
+One row of the catalogue: a family of Claim words tied to one Main metric and one data source.
+_Avoid_: Category, intent, topic
+
+**Main metric**:
+The metric whose threshold sets a Verdict for its Claim type.
+_Avoid_: Primary stat, key metric
+
+**Context metric**:
+A metric shown beside a Verdict that never sets it.
+_Avoid_: Supporting stat, secondary metric
+
+**Reading**:
+One Claim type that an ambiguous word in a Claim can mean. A word with two Readings gets a Verdict for each, shown with its meaning.
+_Avoid_: Interpretation, sense, guess
+
+### Parsing
+
+**Extraction**:
+The fixed JSON the LLM fills from a Claim: subjects, claim words, polarity, tense, form and named seasons, copied verbatim. It holds no metric and no number.
+_Avoid_: Parse, LLM output, intent
+
+**Word map**:
+The versioned table in code that gives each claim word or phrase its Readings, Main metrics and threshold.
+_Avoid_: Lexicon, synonyms, prompt rules
+
+**Polarity**:
+Whether a Claim asserts its words ("affirmed") or denies them ("negated").
+_Avoid_: Sentiment, negation flag
+
+**Claim form**:
+Whether a Claim judges one Subject against its Reference group ("absolute") or two Subjects against each other ("comparison").
+_Avoid_: Claim kind, mode
+
+### Thresholds
+
+**Level word**:
+A word in a Claim that sets how high or low the Main metric must be, such as "elite" or "poor".
+_Avoid_: Adjective, qualifier, intensity
+
+**Level scale**:
+The versioned table that gives each Level word its threshold: a percentile for players and teams, a rank among the 5 leagues for leagues.
+_Avoid_: Rubric, grading scale
+
+**Borderline**:
+A test whose bootstrap interval crosses its threshold, so the data cannot say on which side the Subject sits.
+_Avoid_: Close call, marginal
+
+### Peers
+
+**Line**:
+The part of the pitch a player's Primary position belongs to: Forward, Wide, Central AM, Central midfielder, Full-back, Centre-back or Goalkeeper. Over a Window, the Line with the most minutes.
+_Avoid_: Position group, role, unit
+
+**Reference group**:
+The players, teams or leagues a Claim's Subject is ranked against for one ClaimQuery. It is not Twin's PeerGroup.
+_Avoid_: Peer group, PeerGroup, cohort, comparison set
+
+### Match records
+
+**PlayerMatch**:
+One player's part in one match: minutes, position and Shots.
+_Avoid_: Appearance row, match line
+
+**TeamMatch**:
+One team's side of one match: its npxG, set-piece xG and shots, for and against.
+_Avoid_: Fixture, team game row
+
+### Failures
+
+**Fault**:
+A broken file, failed pin test, service outage or code error. It stops the run with an error and is never a Verdict.
+_Avoid_: Can't check, data gap, failure verdict
+
+**Coverage line**:
+The line on a Verdict that says how many of the Window's seasons it used and why each skipped season was skipped.
+_Avoid_: Data note, footnote
+
+**Thin evidence**:
+A Verdict built on fewer than half its Window's seasons. A fully used 1-season Window is never thin.
+_Avoid_: Low confidence, weak verdict
+
+### Summary lines
+
+**Summary lines**:
+The 2 lines the LLM writes on top of a Verdict, from numbers code gives it. Nothing else on a Verdict comes from the LLM.
+_Avoid_: Explanation, LLM answer, blurb
+
+**Guard**:
+The code checks that Summary lines must pass before they are shown: numbers, Verdict word, names, length, and blocked words.
+_Avoid_: Validator, filter, moderation
+
+**Template fallback**:
+The fixed sentence code writes from the same numbers when Summary lines fail the Guard twice.
+_Avoid_: Default text, error message
+
+### Review
+
+**Headline claim**:
+A Claim taken from a published football headline or standfirst by the fixed collection rule, kept with its source link and date.
+_Avoid_: Real-world claim, news claim, sample claim
+
+**Coverage rate**:
+The share of Headline claims whose Verdict is not Can't check with this data.
+_Avoid_: Hit rate, recall
