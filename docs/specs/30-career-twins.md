@@ -37,3 +37,25 @@ All numbers are in `docs/reports/T30_measurements.md`, written by `scripts/measu
 
 - Decision 2: 188 careers reach 9,000 Pool minutes, below the 500 to 1,000 target.
 - Decision 10: xA per 90 and key passes per 90 correlate at 0.815 on z-scores (0.807 on shrunk values), above 0.8.
+
+## Owner decisions after Part A
+
+Source of every one: Ahmed, 7 Nov 2026, after `docs/reports/T30_measurements.md`, given in the #30 Part B1 brief. Where one differs from a decision above, this one wins.
+
+- **D30-1.** Career bar: 6,000+ total Pool minutes (replaces 9,000). The 500-1,000 target is dropped.
+- **D30-2.** Drop key passes per 90. Keep xA per 90. Add finishing = (npG - npxG) per non-penalty shot. The model keeps 10 metrics.
+- **D30-3.** Finishing shrinkage: the same method as npxG per shot.
+- **D30-4.** Career role group: the role group with the most career minutes.
+- **D30-5.** Career list: role filter only, on by default. Same-league filter stays on season lists only.
+- **D30-6.** Career fingerprint percentiles: percentile among all careers.
+- **D30-7.** Each stint keeps its own minutes. "Seasons covered" counts distinct seasons.
+- **D30-8.** Players under 6,000 minutes keep season twins, labelled "season twins".
+
+## Build choices in Part B1, for Ahmed to confirm
+
+No decision covers these. Each is a named shortcut in the code.
+
+- **Same-role closeness.** On the same-role list, closeness is measured against career pairs inside that role group, as the same-league season list uses same-league pairs (Ahmed, 6 Nov 2026). The all-roles list uses all career pairs (decision 3).
+- **Role group tie.** Two role groups with equal career minutes: the group of the latest Pool season wins. The full data holds 0 such ties (T30).
+- **Career name.** A career shows the name of its latest Pool PlayerSeason.
+- **Career methods.** Career lists are built for every Candidate method, as season lists are. The Basketball method stays on season lists for the validation report.

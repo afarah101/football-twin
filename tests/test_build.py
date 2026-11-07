@@ -17,23 +17,31 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests"))
 from test_standin_loader import sample_run
 from twin.application import build
-from twin.domain import profiles
+from twin.domain import careers, profiles
 from twin.domain.pool import in_pool
 
 PEER_GROUP = ("ENG", 2017)
-PLAYER_KEYS = {"player_id", "name", "clubs", "minutes", "display_position", "metric_profile", "display_stats", "twins"}
+PLAYER_KEYS = {"player_id", "name", "clubs", "minutes", "display_position", "metric_profile", "display_stats", "twins", "career"}
 FILE_KEYS = {"source", "league", "season", "metrics", "player_seasons"}
+CAREER_FILE_KEYS = {"source", "metrics", "career_minutes", "careers"}
+CAREER_KEYS = {"player_id", "name", "minutes", "role_group", "first_season", "last_season", "season_count", "player_seasons", "metric_profile", "percentiles", "twins"}
+CAREER_TWIN_KEYS = {"player_id", "name", "role_group", "first_season", "last_season", "season_count", "minutes", "distance", "closeness"}
 
 
 def loaded():
     return sample_run().loaded
 
 
-def built_files(source=None):
-    """The stand-in run on the sample, into a temporary build folder: {relative path: parsed JSON}."""
+def written_files(source=None):
+    """The stand-in run on the sample, into a temporary build folder: {relative path: parsed JSON}, the career file too."""
     with TemporaryDirectory() as folder:
         build.run(source or loaded(), Path(folder))
         return {path.relative_to(folder).as_posix(): json.loads(path.read_text(encoding="utf8")) for path in Path(folder).rglob("*") if path.is_file()}
+
+
+def built_files(source=None):
+    """The league-season files only."""
+    return {path: content for path, content in written_files(source).items() if not path.endswith(build.CAREER_FILE)}
 
 
 def peer_group_file():
@@ -100,6 +108,72 @@ class MetricShots(unittest.TestCase):
         self.assertAlmostEqual(raw.shots_per_90, len(kept) * 90 / salah.minutes)
         self.assertAlmostEqual(raw.npxg_per_shot, sum(shot.xg for shot in kept) / len(kept))
         self.assertAlmostEqual(raw.xa_per_90, salah.xa * 90 / salah.minutes)
+
+
+class MetricSet(unittest.TestCase):
+    def test_key_passes_is_gone_and_finishing_is_in_the_10_metrics(self):
+        # D30-2: key passes per 90 correlated 0.815 with xA per 90 (T30), so it goes and finishing comes in.
+        self.assertEqual(len(profiles.METRICS), 10)
+        self.assertNotIn("key_passes_per_90", profiles.METRICS)
+        self.assertIn("xa_per_90", profiles.METRICS)
+        self.assertIn("finishing", profiles.METRICS)
+        for content in built_files().values():
+            self.assertEqual(content["metrics"], list(profiles.METRICS))
+            for entry in content["player_seasons"]:
+                self.assertEqual(list(entry["metric_profile"]), list(profiles.METRICS))
+
+    def test_finishing_is_npg_minus_npxg_per_non_penalty_shot(self):
+        # Real: Mohamed Salah ENG 2017/18 scores and takes penalties in the sample.
+        salah = next(found for found in pool_of(*PEER_GROUP) if found.name == "Mohamed Salah")
+        kept = [shot for shot in shots_of(salah) if shot.situation != "Penalty" and shot.result != "OwnGoal"]
+        goals = sum(1 for shot in kept if shot.result == "Goal")
+        self.assertTrue(goals)
+        raw = profiles.raw_metrics(salah, shots_of(salah))
+        self.assertAlmostEqual(raw.finishing, (goals - sum(shot.xg for shot in kept)) / len(kept))
+        self.assertAlmostEqual(raw.finishing, profiles.display_stats(salah, shots_of(salah)).npg_minus_npxg / len(kept))
+
+    def test_finishing_shrinks_by_the_npxg_per_shot_method(self):
+        # D30-3: normal-normal on each non-penalty shot's goal minus xG, as npxG per shot shrinks each shot's xG.
+        index = profiles.METRICS.index("finishing")
+        for (league, season), members in profiles.peer_group_profiles(loaded().player_seasons, loaded().shots).items():
+            groups = [[(shot.result == "Goal") - shot.xg for shot in shots_of(member.player_season) if profiles.counts_for_metrics(shot)] for member in members]
+            self.assertEqual([member.shrunk[index] for member in members], profiles.shrunk_means(groups), (league, season))
+            self.assertEqual([member.values[index] for member in members], profiles.z_scores(profiles.shrunk_means(groups)), (league, season))
+        groups = [[(shot.result == "Goal") - shot.xg for shot in shots_of(player) if profiles.counts_for_metrics(shot)] for player in pool_of(*PEER_GROUP)]
+        mean, _, _ = profiles.normal_normal_prior(groups)
+        for group, shrunk in zip(groups, profiles.shrunk_means(groups)):
+            self.assertLessEqual(abs(shrunk - mean), abs(sum(group) / len(group) - mean) + 1e-12)
+
+
+class CareerFile(unittest.TestCase):
+    def test_the_build_writes_a_career_file_and_marks_each_season_entry(self):
+        content = written_files()[f"private/{build.CAREER_FILE}"]
+        self.assertEqual(set(content), CAREER_FILE_KEYS)
+        self.assertEqual((content["source"], content["metrics"], content["career_minutes"]), ("standin", list(profiles.METRICS), 6000))
+        self.assertEqual(content["careers"], [])  # real: no sample career reaches 6,000 minutes
+        # D30-8: so every sample player keeps season twins only.
+        self.assertEqual({entry["career"] for found in built_files().values() for entry in found["player_seasons"]}, {False})
+
+    def test_career_entries_hold_the_career_profile_percentiles_and_lists(self):
+        # Real sample careers with the bar at the Pool's 900 minutes, since none reaches 6,000.
+        found = careers.career_profiles(profiles.peer_group_profiles(loaded().player_seasons, loaded().shots), career_minutes=900)
+        content = build.career_file(loaded(), found, 900)
+        self.assertEqual(content["career_minutes"], 900)
+        percentiles, lists = careers.career_percentiles(found), careers.career_lists(found)
+        self.assertEqual([entry["player_id"] for entry in content["careers"]], [career.player_id for career in found])
+        for entry, career in zip(content["careers"], found):
+            self.assertEqual(set(entry), CAREER_KEYS)
+            self.assertEqual(entry["metric_profile"], dict(zip(profiles.METRICS, career.values)))
+            self.assertEqual(entry["percentiles"], dict(zip(profiles.METRICS, percentiles[career.player_id])))
+            self.assertEqual(entry["minutes"], sum(season["minutes"] for season in entry["player_seasons"]))
+            self.assertEqual(set(entry["twins"]), set(lists))
+            for method, kinds in entry["twins"].items():
+                self.assertEqual(set(kinds), {"all_roles", "same_role"})
+                self.assertEqual([twin["player_id"] for twin in kinds["same_role"]], [match.career.player_id for match in lists[method][career.player_id].same_role])
+                for twin in kinds["all_roles"] + kinds["same_role"]:
+                    self.assertEqual(set(twin), CAREER_TWIN_KEYS)
+        salah = next(entry for entry in content["careers"] if entry["name"] == "Mohamed Salah")
+        self.assertEqual((salah["minutes"], salah["role_group"], salah["first_season"], salah["last_season"], salah["season_count"]), (3611, "Wide", 2017, 2023, 2))
 
 
 class Shrinkage(unittest.TestCase):
@@ -201,8 +275,9 @@ class PublicFile(unittest.TestCase):
 
     def test_standin_run_writes_only_under_build_private(self):
         self.assertEqual(build.BUILD, ROOT / "build")
-        files = built_files()
+        files = written_files()
         self.assertIn(f"private/{PEER_GROUP[0]}_{PEER_GROUP[1]}.json", files)
+        self.assertIn(f"private/{build.CAREER_FILE}", files)
         self.assertTrue(all(path.startswith("private/") for path in files), sorted(files))
 
 
