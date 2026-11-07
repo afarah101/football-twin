@@ -39,6 +39,7 @@ SEASON_TWINS = "Season twins"  # D30-8
 SAME_ROLE = "Same role only"  # #30 decision 7, D30-5
 FINISHING_LABEL = "Finishing (goals vs xG per shot)"  # D30-12
 SEASONS_COVERED = "Seasons covered: "  # #30 decision 6
+SEASON_PERCENTILE = "Percentile within "  # D30-14: "Percentile within <league> <season>, from 0 to 100"
 HOW_IT_WORKS = (  # #30 decision 11, with the D30-1 bar
     "How it works",
     "compared with the other attackers in the same league and season",
@@ -95,32 +96,69 @@ def career_files(site=career_site):
 
 
 class NameIndex(unittest.TestCase):
-    def test_name_index_holds_each_pool_player_season_once(self):
-        pool = {found.key: found for found in loaded().player_seasons if in_pool(found)}
-        keys = [(entry["league"], entry["season"], entry["player_id"]) for entry in names()]
-        self.assertEqual(len(keys), len(set(keys)))
-        self.assertEqual(set(keys), set(pool))
+    def test_name_index_holds_one_entry_per_player_never_one_per_season(self):
+        # D30-13: one search row per player; his Pool seasons are season links inside that one entry.
+        pool = [found for found in loaded().player_seasons if in_pool(found)]
+        ids = [entry["player_id"] for entry in names()]
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertEqual(set(ids), {found.player_id for found in pool})
         for entry in names():
-            found = pool[(entry["league"], entry["season"], entry["player_id"])]
-            self.assertEqual((entry["name"], entry["minutes"], entry["clubs"]), (found.name, found.minutes, list(found.clubs)))
-            listed = {player["player_id"] for player in data_files()[f"data/{entry['file']}"]["player_seasons"]}
-            self.assertIn(entry["player_id"], listed)
-        # Real: Mohamed Salah holds two Pool seasons in the sample (2017/18 and 2023/24), so search shows two entries.
-        self.assertEqual(sorted(entry["season"] for entry in names() if entry["name"] == "Mohamed Salah"), [2017, 2023])
+            mine = sorted((found for found in pool if found.player_id == entry["player_id"]), key=lambda found: (found.season, found.league))
+            self.assertEqual([(link["league"], link["season"], link["minutes"]) for link in entry["player_seasons"]], [(found.league, found.season, found.minutes) for found in mine])
+            self.assertEqual((entry["first_season"], entry["last_season"], entry["minutes"]), (mine[0].season, mine[-1].season, sum(found.minutes for found in mine)))
+            self.assertEqual(entry["name"], mine[-1].name)
+            self.assertEqual(entry["clubs"], list(dict.fromkeys(club for found in mine for club in found.clubs)))
+            for link in entry["player_seasons"]:
+                listed = {player["player_id"] for player in data_files()[f"data/{link['file']}"]["player_seasons"]}
+                self.assertIn(entry["player_id"], listed)
+        # Real: Mohamed Salah holds two Pool seasons in the sample (2017/18 and 2023/24): one entry, two season links.
+        salah = [entry for entry in names() if entry["name"] == "Mohamed Salah"]
+        self.assertEqual(len(salah), 1)
+        self.assertEqual([link["season"] for link in salah[0]["player_seasons"]], [2017, 2023])
+        self.assertEqual((salah[0]["career"], salah[0]["file"]), (False, "ENG_2023.json"))  # no career: opens his latest season
 
-    def test_a_stint_out_of_the_pool_is_not_in_the_name_index(self):
+    def test_a_career_entry_carries_the_career_summary(self):
+        # Real: at the 900-minute bar Salah is a Wide career, 2017/18-2023/24, 3,611 Pool minutes.
+        salah = [entry for entry in names(career_site) if entry["name"] == "Mohamed Salah"]
+        self.assertEqual(len(salah), 1)
+        self.assertEqual((salah[0]["career"], salah[0]["role_group"], salah[0]["first_season"], salah[0]["last_season"], salah[0]["minutes"]), (True, "Wide", 2017, 2023, 3611))
+
+    def test_a_stint_out_of_the_pool_is_not_a_season_link(self):
         # Real: Ben Brereton 2023/24, Premier League stint in the Pool, La Liga stint 23 minutes. Stints are never merged.
         stints = sorted(found.league for found in loaded().player_seasons if found.player_id == "57827369" and found.season == 2023)
         self.assertEqual(stints, ["ENG", "ESP"])
-        self.assertEqual([(entry["league"], entry["minutes"]) for entry in names() if entry["player_id"] == "57827369"], [("ENG", 1105)])
+        brereton = [entry for entry in names() if entry["player_id"] == "57827369"]
+        self.assertEqual([(link["league"], link["minutes"]) for link in brereton[0]["player_seasons"]], [("ENG", 1105)])
 
-    def test_real_two_stint_player_shows_as_two_player_seasons_on_data_standin(self):
+    def test_real_two_stint_season_shows_as_two_season_links_on_data_standin(self):
         # Real, on data/standin/: Philippe Coutinho 2017/18, Liverpool then Barcelona. The sample holds no such case.
+        # D30-13: the #11 two-stint rule now lives in the season links, in the names entry and the career file alike.
         from twin.infrastructure.standin.loader import StandinLoader
 
-        full = json.loads(site_of(StandinLoader().load())["data/names.json"])
-        coutinho = sorted((entry["league"], entry["season"], entry["minutes"], entry["file"]) for entry in full if entry["name"] == "Philippe Coutinho" and entry["season"] == 2017)
-        self.assertEqual(coutinho, [("ENG", 2017, 1109, "ENG_2017.json"), ("ESP", 2017, 1296, "ESP_2017.json")])
+        full = site_of(StandinLoader().load())
+        coutinho = [entry for entry in json.loads(full["data/names.json"]) if entry["name"] == "Philippe Coutinho"]
+        self.assertEqual(len(coutinho), 1)
+        stints = [(link["league"], link["season"], link["minutes"], link["file"]) for link in coutinho[0]["player_seasons"] if link["season"] == 2017]
+        self.assertEqual(stints, [("ENG", 2017, 1109, "ENG_2017.json"), ("ESP", 2017, 1296, "ESP_2017.json")])
+        if coutinho[0]["career"]:
+            career = json.loads(full[f"data/careers/{coutinho[0]['player_id']}.json"])
+            self.assertEqual([(season["league"], season["season"], season["minutes"], season["file"]) for season in career["player_seasons"] if season["season"] == 2017], stints)
+
+
+class SeasonPercentiles(unittest.TestCase):
+    def test_season_fingerprint_holds_build_percentiles_within_the_league_season(self):
+        # D30-14: mid-rank percentiles of each metric among the league-season's Pool PlayerSeasons, from 0 to 100.
+        from twin.domain.twins import percentiles
+
+        groups = profiles.peer_group_profiles(loaded().player_seasons, loaded().shots)
+        for (league, season), members in groups.items():
+            content = data_files()[f"data/{league}_{season}.json"]
+            shown = {entry["player_id"]: entry["percentiles"] for entry in content["player_seasons"]}
+            for index, metric in enumerate(profiles.METRICS):
+                expected = percentiles([member.values[index] for member in members])
+                for member, value in zip(members, expected):
+                    self.assertAlmostEqual(shown[member.player_season.player_id][metric], float(value))
+                    self.assertTrue(0 <= shown[member.player_season.player_id][metric] <= 100)
 
 
 class TwinsData(unittest.TestCase):
@@ -223,7 +261,7 @@ class SiteFiles(unittest.TestCase):
         self.assertIn("closer than", script)
         self.assertIn(CLOSENESS, script)
         self.assertIn(SAME_LEAGUE_CLOSENESS, script)
-        for text in (CAREER_CLOSENESS, FINISHING_LABEL, SEASONS_COVERED):
+        for text in (CAREER_CLOSENESS, FINISHING_LABEL, SEASONS_COVERED, SEASON_PERCENTILE):
             self.assertIn(text, script)
         for text in (SEASON_TWINS, SAME_ROLE) + HOW_IT_WORKS:
             self.assertIn(text, page)

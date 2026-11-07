@@ -24,6 +24,7 @@ from test_site_data import CAREER_BAR, CREDIT, DATA_TO, FINISHING_LABEL, HOW_IT_
 from twin.application import build, site_data
 
 HAS_PLAYWRIGHT = importlib.util.find_spec("playwright") is not None
+SEASON_PERCENTILE_LABEL = "Percentile within ENG 2017/18, from 0 to 100"  # D30-14, for Salah's ENG 2017/18
 
 
 class QuietHandler(SimpleHTTPRequestHandler):
@@ -77,11 +78,19 @@ class SiteSmoke(unittest.TestCase):
                     page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
                     page.goto(f"http://127.0.0.1:{server.server_address[1]}/")
 
-                    # Real: Mohamed Salah holds two Pool seasons in the sample, so search offers both.
+                    # Real: Mohamed Salah holds two Pool seasons in the sample and no career at 6,000 minutes:
+                    # one search row (D30-13), which opens his latest season, with a link to each of his seasons.
                     page.fill("#search", "salah")
                     results = page.locator("#results button")
-                    expect(results).to_have_count(2)
-                    results.filter(has_text="2017/18").click()
+                    expect(results).to_have_count(1)
+                    self.assertRegex(results.first.inner_text(), r"^Mohamed Salah · 2017/18-2023/24 · [\d,]+ min · \S")
+                    results.first.click()
+                    meta = page.locator("#player-meta")
+                    expect(meta).to_contain_text("ENG 2023/24")
+                    links = page.locator("#player-seasons button")
+                    expect(links).to_have_count(2)
+                    links.filter(has_text="2017/18").click()
+                    expect(meta).to_contain_text("ENG 2017/18")
 
                     twins = page.locator("#twins li")
                     expect(twins).to_have_count(5)
@@ -99,8 +108,16 @@ class SiteSmoke(unittest.TestCase):
                         self.assertRegex(twins.nth(index).inner_text(), r"closer than \d+(\.\d)?% of same-league pairs")
                     page.uncheck("#same-league")
                     expect(twins.first).to_contain_text("of all pairs")
-                    expect(page.locator("svg#fingerprint")).to_have_count(1)
-                    expect(page.locator("svg#fingerprint rect.bar")).to_have_count(10)
+                    # D30-14: the season Fingerprint is in Build percentiles within its league-season.
+                    fingerprint = page.locator("svg#fingerprint")
+                    expect(fingerprint).to_have_count(1)
+                    expect(fingerprint.locator("rect.bar")).to_have_count(10)
+                    expect(page.locator("#player")).to_contain_text(SEASON_PERCENTILE_LABEL)
+                    self.assertEqual(fingerprint.get_attribute("aria-label"), SEASON_PERCENTILE_LABEL)
+                    values = fingerprint.locator("text.value").all_text_contents()
+                    self.assertEqual(len(values), 10)
+                    self.assertTrue(all(value.isdigit() and 0 <= int(value) <= 100 for value in values), values)
+                    self.assertEqual(fingerprint.locator("text.scale").all_text_contents(), ["0", "50", "100"])
                     expect(page.locator("svg#display-stats")).to_have_count(1)
 
                     body = page.locator("body")
@@ -109,8 +126,11 @@ class SiteSmoke(unittest.TestCase):
                     self.assertEqual(page.locator("a", has_text="Understat").get_attribute("href"), "https://understat.com")
 
                     # Real: Darwin Núñez ENG 2023/24, 934 minutes. Search ignores accents.
+                    # No career: 1 row, which opens his latest season.
                     page.fill("#search", "nunez")
-                    page.locator("#results button").first.click()
+                    expect(results).to_have_count(1)
+                    results.first.click()
+                    expect(page.locator("#player-meta")).to_contain_text("ENG 2023/24")
                     expect(page.locator("#player")).to_contain_text("Darwin Núñez")
                     expect(page.locator("#player")).to_contain_text(SMALL_SAMPLE)
                     # D30-8: under 6,000 career minutes, so the season view, headed "Season twins".
@@ -124,10 +144,10 @@ class SiteSmoke(unittest.TestCase):
                     page.route("**/data/ENG_2017.json", lambda route: held.append(route))
                     page.reload()  # empties the page's file cache, so both seasons are fetched
                     page.fill("#search", "salah")
-                    expect(results).to_have_count(2)
-                    results.filter(has_text="2017/18").click()
-                    results.filter(has_text="2023/24").click()
-                    meta = page.locator("#player-meta")
+                    results.first.click()
+                    expect(meta).to_contain_text("ENG 2023/24")
+                    links.filter(has_text="2017/18").click()
+                    links.filter(has_text="2023/24").click()
                     expect(meta).to_contain_text("ENG 2023/24")
                     held[0].continue_()
                     page.wait_for_function("files.has('ENG_2017.json')")  # the late file is read and its render step ran
@@ -144,9 +164,11 @@ class SiteSmoke(unittest.TestCase):
         twin_line = re.compile(r"^(.+) · (Forward|Wide|Central AM) · \d{4}/\d{2}(-\d{4}/\d{2})? · [\d,]+ min · (closer than \d+(\.\d)?% of all careers)$")
         with site_page(CAREER_BAR) as (page, errors):
             # Real: Mohamed Salah, ENG 2017/18 and 2023/24, 3,611 Pool minutes: a career once the bar is at 900.
+            # D30-13: one search row, in the career format, which opens the career view.
             page.fill("#search", "salah")
             results = page.locator("#results button")
-            expect(results).to_have_count(2)
+            expect(results).to_have_count(1)
+            self.assertRegex(results.first.inner_text(), r"^Mohamed Salah · Wide · 2017/18-2023/24 · 3,611 min · \S")
             results.first.click()
             career = page.locator("#career")
             expect(career).to_be_visible()
@@ -193,16 +215,22 @@ class SiteSmoke(unittest.TestCase):
             for text in HOW_IT_WORKS:
                 expect(page.locator("#how-it-works")).to_contain_text(text)
 
-            # A link from the career to each season view, which keeps "Same league only".
+            # Every season is a link under "Seasons covered" (D30-13); each opens its season view, which keeps "Same league only".
+            expect(page.locator("#career h3", has_text="Seasons covered")).to_be_visible()
             links = page.locator("#career-seasons button")
             expect(links).to_have_count(2)
-            links.filter(has_text="2017/18").click()
-            expect(page.locator("#player")).to_be_visible()
-            expect(career).to_be_hidden()
-            expect(page.locator("#player-meta")).to_contain_text("ENG 2017/18")
-            expect(page.locator("#player h3", has_text=SEASON_TWINS)).to_be_visible()
-            expect(page.locator("#same-league")).to_be_visible()
-            expect(page.locator("#twins li")).to_have_count(5)
+            for season in ("2017/18", "2023/24"):
+                if not career.is_visible():
+                    page.fill("#search", "salah")
+                    results.first.click()
+                    expect(career).to_be_visible()
+                links.filter(has_text=season).click()
+                expect(page.locator("#player")).to_be_visible()
+                expect(career).to_be_hidden()
+                expect(page.locator("#player-meta")).to_contain_text(f"ENG {season}")
+                expect(page.locator("#player h3", has_text=SEASON_TWINS)).to_be_visible()
+                expect(page.locator("#same-league")).to_be_visible()
+                expect(page.locator("#twins li")).to_have_count(5)
         self.assertEqual(errors, [])
 
 

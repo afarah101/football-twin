@@ -68,3 +68,14 @@ Source of every one: Ahmed, 7 Nov 2026, given in the #30 Part B2 brief. Where on
 - **D30-10.** Accept: a role tie goes to the latest season; a career shows its latest name; career lists exist for all 3 methods. The site shows Euclidean.
 - **D30-11.** No data file loaded for one player view may exceed 1 MB. Split careers.json as needed.
 - **D30-12.** Fingerprint labels in plain English. finishing shows as "Finishing (goals vs xG per shot)".
+
+## Owner decisions after Part B2
+
+Source of every one: Ahmed, 7 Nov 2026, given in the #30 fix brief. Where one differs from a decision or choice above, this one wins.
+
+- **D30-13.** Search shows one row per player.
+  - Career player: "Name · role group · first-last season · career minutes · clubs". Opens the career view.
+  - Player without a career: "Name · first-last season · total minutes · clubs". Opens his latest season, with links to his other seasons.
+  - The career view lists every season as a link under "Seasons covered".
+  - A two-stint season still shows as two separate season links (the #11 rule moves from the search list to the season links).
+- **D30-14.** The season Fingerprint shows percentiles 0-100 within its league-season, labelled "Percentile within <league> <season>, from 0 to 100". The Build computes these percentiles. The browser does no maths.

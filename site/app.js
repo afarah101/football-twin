@@ -17,7 +17,6 @@ const LABELS = {
   take_on_share: "Shots after beating a player",
   through_ball_share: "Shots after a through ball",
 };
-const Z_SCALE = { low: -3, high: 3, origin: 0, digits: 2, label: "Fingerprint: z-score of each metric within its league-season, from -3 to 3" };
 const PERCENTILE_SCALE = { low: 0, high: 100, origin: 0, digits: 0, label: "Fingerprint: percentile of each metric among all careers, from 0 to 100" };
 const SVG = "http://www.w3.org/2000/svg";
 
@@ -107,6 +106,17 @@ function renderTwins() {
   more.hidden = showAll || twins.length <= SHOWN;
 }
 
+// D30-13: one link per Pool PlayerSeason, so a two-stint season shows as two links (#11).
+function seasonLinks(player) {
+  return player.player_seasons.map((season) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = `${season.league} ${seasonLabel(season.season)} · ${minutesLabel(season.minutes)}`;
+    button.addEventListener("click", () => pick({ player_id: player.player_id, name: player.name, file: season.file, career: false }));
+    return button;
+  });
+}
+
 function renderPlayer(content, entry) {
   current = { content, entry };
   showAll = false;
@@ -114,7 +124,12 @@ function renderPlayer(content, entry) {
   const meta = byId("player-meta");
   meta.textContent = `${content.league} ${seasonLabel(content.season)} · ${entry.clubs.join(", ")} · ${minutesLabel(entry.minutes)}${entry.display_position ? ` · ${entry.display_position}` : ""}`;
   if (entry.small_sample) meta.append(" ", smallSampleFlag());
-  byId("fingerprint-box").replaceChildren(drawFingerprint("fingerprint", content.metrics, entry.metric_profile, Z_SCALE));
+  // D30-14: percentiles from the Build, within this league-season.
+  const label = `Percentile within ${content.league} ${seasonLabel(content.season)}, from 0 to 100`;
+  byId("fingerprint-label").textContent = label;
+  byId("fingerprint-box").replaceChildren(drawFingerprint("fingerprint", content.metrics, entry.percentiles, { ...PERCENTILE_SCALE, label }));
+  const player = names.find((found) => found.player_id === entry.player_id);
+  byId("player-seasons").replaceChildren(...(player ? seasonLinks(player) : []));
   byId("display-stats-box").replaceChildren(drawDisplayStats(entry.display_stats));
   renderTwins();
   showView("player");
@@ -138,13 +153,7 @@ function renderCareer(career) {
   const count = career.season_count === 1 ? "1 season" : `${career.season_count} seasons`;
   byId("career-meta").textContent = `${career.role_group} · Seasons covered: ${seasonsLabel(career)} (${count}) · ${minutesLabel(career.minutes)}`;
   byId("career-fingerprint-box").replaceChildren(drawFingerprint("career-fingerprint", career.metrics, career.percentiles, PERCENTILE_SCALE));
-  byId("career-seasons").replaceChildren(...career.player_seasons.map((season) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = `${season.league} ${seasonLabel(season.season)} · ${minutesLabel(season.minutes)}`;
-    button.addEventListener("click", () => pick({ player_id: career.player_id, name: career.name, file: season.file, career: false }));
-    return button;
-  }));
+  byId("career-seasons").replaceChildren(...seasonLinks(career));
   renderCareerTwins();
   showView("career");
 }
@@ -174,7 +183,8 @@ function search() {
     const button = document.createElement("button");
     button.type = "button";
     button.setAttribute("role", "listitem");
-    button.textContent = `${entry.name} · ${entry.league} ${seasonLabel(entry.season)} · ${entry.clubs.join(", ")} · ${minutesLabel(entry.minutes)}`;
+    // D30-13: one row per player; a career row names its role group.
+    button.textContent = [entry.name, ...(entry.career ? [entry.role_group] : []), seasonsLabel(entry), minutesLabel(entry.minutes), entry.clubs.join(", ")].join(" · ");
     button.addEventListener("click", () => pick(entry));
     return button;
   }));
