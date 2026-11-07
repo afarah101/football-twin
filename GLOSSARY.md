@@ -40,6 +40,24 @@ _Avoid_: Cohort, comparison set
 A number shown to the reader that is never part of a MetricProfile, such as goals or assists.
 _Avoid_: Extra metric
 
+**Finishing**:
+Non-penalty goals minus non-penalty xG, per non-penalty shot, for one PlayerSeason. Own goals do not count. Metric 11 from #30, shrunk like the other small-sample values.
+_Avoid_: Clinicality, conversion, overperformance
+
+### Careers
+
+**CareerProfile**:
+The minutes-weighted mean of the MetricProfiles of one person's Pool PlayerSeasons (#30). Each season keeps its own PeerGroup z-scores.
+_Avoid_: Career vector, career average, player profile
+
+**Career minutes**:
+The total minutes of one person's Pool PlayerSeasons. Seasons under 900 minutes do not count. A career needs 9,000 or more (#30).
+_Avoid_: Total minutes, career length
+
+**Role group**:
+Forward, Wide or Central AM, from a PlayerSeason's display position: FW is Forward, LW and RW are Wide, AM is Central AM (#30).
+_Avoid_: Role, position group, Primary position
+
 ### Twins
 
 **TwinMatch**:
