@@ -61,6 +61,7 @@ class DisplayStats:
 class MetricProfile:
     player_season: object  # the PlayerSeason it describes
     values: tuple  # z-scores, in METRICS order
+    shrunk: tuple  # the values before the z-score, in METRICS order: the Basketball method's input (Q20)
     display_stats: DisplayStats
 
 
@@ -154,7 +155,7 @@ def peer_group_profiles(player_seasons, shots):
         columns += [shrunk_shares([raw.share_counts[index] for raw in raws], trials) for index in range(len(SHARES))]
         z_columns = [z_scores(column) for column in columns]
         profiles[key] = [
-            MetricProfile(found, tuple(column[row] for column in z_columns), display_stats(found, shots_of[found.key]))
+            MetricProfile(found, tuple(column[row] for column in z_columns), tuple(column[row] for column in columns), display_stats(found, shots_of[found.key]))
             for row, found in enumerate(members)
         ]
     return profiles
