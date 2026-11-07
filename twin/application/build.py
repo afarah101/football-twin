@@ -1,6 +1,7 @@
-"""The Build: a LoadedSource to one file per league-season of MetricProfiles and twin lists (Q23, Q26).
+"""The Build: a LoadedSource to one file per league-season of MetricProfiles and twin lists (Q23, Q26), and one career file (#30).
 
-Each entry holds both twin lists of every Candidate method. The Basketball method is only a Comparison method, so it stays
+Each entry holds both twin lists of every Candidate method, and whether its player has a CareerProfile. A player without one
+keeps season twins only (D30-8). The career file holds every CareerProfile with its percentiles and both career lists. The Basketball method is only a Comparison method, so it stays
 on the validation report and out of these files (Q20).
 
 A public file is site or release output (D43). Only `write_public_files` writes one, and it fails the run unless the source
@@ -10,10 +11,12 @@ Usage: python3 -m twin.application.build  (the stand-in run, into build/private/
 import json
 from pathlib import Path
 
+from twin.domain.careers import CAREER_MINUTES, career_lists, career_percentiles, career_profiles
 from twin.domain.profiles import METRICS, peer_group_profiles
 from twin.domain.twins import CANDIDATE_METHODS, twin_lists
 
 BUILD = Path(__file__).resolve().parent.parent.parent / "build"
+CAREER_FILE = "careers.json"  # beside the league-season files; write_files returns only those, which the site reads
 
 
 def twin_entries(matches):
@@ -24,7 +27,37 @@ def twin_entries(matches):
     ]
 
 
-def profile_file(loaded, league, season, profiles, lists):
+def career_summary(career):
+    return {"player_id": career.player_id, "name": career.name, "role_group": career.role_group, "first_season": career.first_season,
+            "last_season": career.last_season, "season_count": career.season_count, "minutes": career.minutes}
+
+
+def career_twin_entries(matches):
+    return [{**career_summary(found.career), "distance": found.distance, "closeness": found.closeness} for found in matches]
+
+
+def career_file(loaded, careers, career_minutes):
+    """Derived values only (Q3), like the league-season files."""
+    percentiles, lists = career_percentiles(careers), career_lists(careers)
+    return {
+        "source": loaded.source,
+        "metrics": list(METRICS),
+        "career_minutes": career_minutes,
+        "careers": [
+            {
+                **career_summary(career),
+                "player_seasons": [{"league": found.player_season.league, "season": found.player_season.season, "minutes": found.player_season.minutes} for found in career.profiles],
+                "metric_profile": dict(zip(METRICS, career.values)),
+                "percentiles": dict(zip(METRICS, percentiles[career.player_id])),
+                "twins": {method: {"all_roles": career_twin_entries(lists[method][career.player_id].all_roles), "same_role": career_twin_entries(lists[method][career.player_id].same_role)}
+                          for method in lists},
+            }
+            for career in careers
+        ],
+    }
+
+
+def profile_file(loaded, league, season, profiles, lists, career_ids):
     """Derived values only (Q3): no shot row and no raw season total."""
     return {
         "source": loaded.source,
@@ -44,6 +77,7 @@ def profile_file(loaded, league, season, profiles, lists):
                     method: {"all_leagues": twin_entries(lists[method][found.player_season.key].all_leagues), "same_league": twin_entries(lists[method][found.player_season.key].same_league)}
                     for method in CANDIDATE_METHODS
                 },
+                "career": found.player_season.player_id in career_ids,
             }
             for found in profiles
         ],
@@ -55,10 +89,13 @@ def write_files(loaded, folder):
     written = []
     peer_groups = peer_group_profiles(loaded.player_seasons, loaded.shots)
     lists = twin_lists(peer_groups)
+    careers = career_profiles(peer_groups)
+    career_ids = {career.player_id for career in careers}
     for (league, season), profiles in peer_groups.items():
         path = folder / f"{league}_{season}.json"
-        path.write_text(json.dumps(profile_file(loaded, league, season, profiles, lists), ensure_ascii=False, indent=1) + "\n", encoding="utf8")
+        path.write_text(json.dumps(profile_file(loaded, league, season, profiles, lists, career_ids), ensure_ascii=False, indent=1) + "\n", encoding="utf8")
         written.append(path)
+    (folder / CAREER_FILE).write_text(json.dumps(career_file(loaded, careers, CAREER_MINUTES), ensure_ascii=False, indent=1) + "\n", encoding="utf8")
     return written
 
 

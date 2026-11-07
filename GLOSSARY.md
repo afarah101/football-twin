@@ -40,6 +40,32 @@ _Avoid_: Cohort, comparison set
 A number shown to the reader that is never part of a MetricProfile, such as goals or assists.
 _Avoid_: Extra metric
 
+**Finishing**:
+Non-penalty goals minus non-penalty xG, per non-penalty shot, for one PlayerSeason. Own goals do not count. One of the 10 metrics since #30 (D30-2), in place of key passes per 90. It shrinks like npxG per shot, by normal-normal on each shot's goal minus xG (D30-3).
+_Avoid_: Clinicality, conversion, overperformance
+
+### Careers
+
+**CareerProfile**:
+The minutes-weighted mean of the MetricProfiles of one person's Pool PlayerSeasons, for a person with 6,000+ career minutes (#30). Each season keeps its own PeerGroup z-scores. Code: `twin.domain.careers.CareerProfile`.
+_Avoid_: Career vector, career average, player profile
+
+**CareerMatch**:
+One CareerProfile returned as close to another, with its distance and closeness percentile. Closeness is against career pairs only (#30 decision 3). Code: `twin.domain.careers.CareerMatch`.
+_Avoid_: Career neighbour, similar career
+
+**Season twins**:
+The TwinMatches of a PlayerSeason. For a player under 6,000 career minutes they are the only list, labelled "season twins" (D30-8).
+_Avoid_: Fallback list, short-career twins
+
+**Career minutes**:
+The total minutes of one person's Pool PlayerSeasons, each stint with its own minutes (D30-7). Seasons under 900 minutes do not count. A career needs 6,000 or more (D30-1).
+_Avoid_: Total minutes, career length
+
+**Role group**:
+Forward, Wide or Central AM, from a PlayerSeason's display position: FW is Forward, LW and RW are Wide, AM is Central AM (#30). A career's role group is the one with the most career minutes (D30-4).
+_Avoid_: Role, position group
+
 ### Twins
 
 **TwinMatch**:

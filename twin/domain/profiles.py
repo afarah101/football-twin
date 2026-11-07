@@ -1,7 +1,7 @@
 """MetricProfiles: the 10 metrics of each Pool PlayerSeason, shrunk and standardised within its PeerGroup (plan, Metrics and Method).
 
-Shares shrink by beta-binomial and npxG per shot by normal-normal, both by method of moments (plan step 1, Q8). Per-90
-metrics stay unshrunk. Every metric is z-scored within the PeerGroup and clipped at ±3 (plan step 2).
+Shares shrink by beta-binomial, and npxG per shot and finishing by normal-normal on each shot's value, all by method of
+moments (plan step 1, Q8, D30-3). Per-90 metrics stay unshrunk. Every metric is z-scored within the PeerGroup and clipped at ±3 (plan step 2).
 """
 import math
 from collections import defaultdict
@@ -14,9 +14,11 @@ BOX_X_MIN, BOX_Y_MIN, BOX_Y_MAX = 0.8275, 0.2075, 0.7925
 SIX_X_MIN, SIX_Y_MIN, SIX_Y_MAX = 0.9425, 0.365, 0.635
 Z_CLIP = 3.0
 
-PER_90 = ("shots_per_90", "xa_per_90", "key_passes_per_90", "xg_buildup_per_90")
+# D30-2: key passes per 90 is out (0.815 with xA per 90, T30) and finishing is in, so the model keeps 10 metrics.
+PER_90 = ("shots_per_90", "xa_per_90", "xg_buildup_per_90")
+PER_SHOT = ("npxg_per_shot", "finishing")  # each shrinks by normal-normal on its shots' values
 SHARES = ("six_yard_share", "outside_box_share", "header_share", "take_on_share", "through_ball_share")
-METRICS = PER_90 + ("npxg_per_shot",) + SHARES
+METRICS = PER_90 + PER_SHOT + SHARES
 
 
 def in_box(shot, x_min, y_min, y_max):
@@ -42,10 +44,11 @@ class RawMetrics:
     """One PlayerSeason's metrics before shrinkage: per-90 values, its shot xGs, and its count for each share."""
     shots_per_90: float
     xa_per_90: float
-    key_passes_per_90: float
     xg_buildup_per_90: float
     npxg_per_shot: float  # nan with no non-penalty shot: shrinkage gives it the PeerGroup mean
+    finishing: float  # (npG - npxG) per non-penalty shot, nan with none
     shot_xgs: tuple
+    shot_finishes: tuple  # each non-penalty shot's goal (1 or 0) minus its xG
     share_counts: tuple  # in SHARES order
 
 
@@ -70,9 +73,11 @@ def raw_metrics(player_season, shots):
     kept = [shot for shot in shots if counts_for_metrics(shot)]
     per_90 = 90 / player_season.minutes
     xgs = tuple(shot.xg for shot in kept)
+    finishes = tuple((shot.result == "Goal") - shot.xg for shot in kept)
     return RawMetrics(
-        len(kept) * per_90, player_season.xa * per_90, player_season.key_passes * per_90, player_season.xg_buildup * per_90,
-        sum(xgs) / len(xgs) if xgs else math.nan, xgs, tuple(sum(1 for shot in kept if SHARE_TESTS[share](shot)) for share in SHARES),
+        len(kept) * per_90, player_season.xa * per_90, player_season.xg_buildup * per_90,
+        sum(xgs) / len(xgs) if xgs else math.nan, sum(finishes) / len(finishes) if finishes else math.nan,
+        xgs, finishes, tuple(sum(1 for shot in kept if SHARE_TESTS[share](shot)) for share in SHARES),
     )
 
 
@@ -152,6 +157,7 @@ def peer_group_profiles(player_seasons, shots):
         trials = [len(raw.shot_xgs) for raw in raws]
         columns = [[getattr(raw, metric) for raw in raws] for metric in PER_90]
         columns.append(shrunk_means([raw.shot_xgs for raw in raws]))
+        columns.append(shrunk_means([raw.shot_finishes for raw in raws]))
         columns += [shrunk_shares([raw.share_counts[index] for raw in raws], trials) for index in range(len(SHARES))]
         z_columns = [z_scores(column) for column in columns]
         profiles[key] = [

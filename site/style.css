@@ -13,7 +13,11 @@ input[type="search"] { width: 100%; box-sizing: border-box; padding: 8px 10px; f
 .filter { font-weight: 400; margin-bottom: 8px; }
 .flag { display: inline-block; padding: 0 6px; font-size: 0.8rem; border: 1px solid #a86b00; color: #7a4e00; border-radius: 4px; }
 #twins li { margin: 4px 0; }
-#show-more { font: inherit; padding: 6px 12px; border: 1px solid #2a6fb0; background: #fff; color: #2a6fb0; border-radius: 6px; cursor: pointer; }
+#career-meta { color: #4a5560; }
+#career-twins li { margin: 4px 0; }
+.season-links button { font: inherit; margin: 2px 6px 2px 0; padding: 4px 10px; background: #fff; border: 1px solid #d5dbe0; border-radius: 6px; cursor: pointer; }
+#how-it-works { margin-top: 32px; }
+#show-more, .show-more { font: inherit; padding: 6px 12px; border: 1px solid #2a6fb0; background: #fff; color: #2a6fb0; border-radius: 6px; cursor: pointer; }
 svg { width: 100%; height: auto; font-size: 13px; }
 svg text { fill: #1d232b; }
 svg .value, svg .scale { fill: #4a5560; }

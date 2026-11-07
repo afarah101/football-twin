@@ -22,14 +22,38 @@
     <h2 id="player-name"></h2>
     <p id="player-meta"></p>
     <h3>Fingerprint</h3>
+    <p id="fingerprint-label" class="label"></p>
     <div id="fingerprint-box"></div>
     <h3>Display stats</h3>
     <div id="display-stats-box"></div>
-    <h3>Twins</h3>
+    <h3>Season twins</h3>
     <p class="label">style twin, not level twin</p>
     <label class="filter"><input id="same-league" type="checkbox"> Same league only</label>
     <ol id="twins"></ol>
     <button id="show-more" type="button" hidden>Show more</button>
+    <h3>Seasons covered</h3>
+    <div id="player-seasons" class="season-links"></div>
+  </section>
+  <section id="career" hidden aria-live="polite">
+    <h2 id="career-name"></h2>
+    <p id="career-meta"></p>
+    <h3>Fingerprint</h3>
+    <p class="label">Percentile among all careers, from 0 to 100</p>
+    <div id="career-fingerprint-box"></div>
+    <h3>Career twins</h3>
+    <p class="label">style twin, not level twin</p>
+    <label class="filter"><input id="same-role" type="checkbox" checked> Same role only</label>
+    <ol id="career-twins"></ol>
+    <button id="career-show-more" class="show-more" type="button" hidden>Show more</button>
+    <h3>Seasons covered</h3>
+    <div id="career-seasons" class="season-links"></div>
+  </section>
+  <section id="how-it-works" aria-labelledby="how-it-works-title">
+    <h2 id="how-it-works-title">How it works</h2>
+    <p>Each player's attacking style is described by 10 numbers:</p>
+    <ul id="metric-list"></ul>
+    <p>Each number is compared with the other attackers in the same league and season. For a career, the seasons are averaged over the career, weighted by minutes played. A twin is the nearest match: the career, or the season, whose numbers sit closest.</p>
+    <p>Limits: Attacking style only, so no defending, pace or height. Data 2017/18-2023/24. Careers need 6,000+ minutes; other players get season twins.</p>
   </section>
 </main>
 <footer>
