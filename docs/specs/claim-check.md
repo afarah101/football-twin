@@ -1,8 +1,6 @@
 # Claim Check design (grill record)
 
-Status: grill finished on 7 Nov 2026 (Q1-Q20, defaults D1-D9). This file records each grill answer. It is not yet a spec: `/to-spec` and `/to-tickets` have not run.
-
-**First steps in /to-spec:** write ADRs 0001-0003 (Q19). Draft word map v1 and level scale v1, have Gemini review them, and get Ahmed's approval (Q20). Measure the shot-count distribution and propose the final Pooled minimum (Q7). Before collecting, fill the Headline claim rule's Gemini prompt, seed and Guardian terms check (Q17). Get the outside review of claims 1-6's expected Verdicts (Q15).
+Status: grill finished 7 Nov 2026 (Q1-Q20, defaults D1-D9). /to-spec ran 7 Nov 2026: ADRs 0001-0003 are written (`docs/adr/`), the shot minimum is measured ("Shot minimum measurement"), word map v1 is drafted (`docs/specs/claim-check-wordmap-v1-draft.md`, DRAFT, NOT FROZEN), and the spec is below ("Spec"). /to-tickets ran the same day, see "Tickets".
 
 A number here is either MEASURED (with the command or file that shows it) or tagged `NOT RUN`.
 
@@ -399,3 +397,198 @@ The review never self-grades. The reviewer is a model family that builds no part
 **When.** Before the publishing gate (Q11), and again on every word-map, level-scale or method version change.
 
 **Where.** A report under `docs/reports/`, at build time.
+
+## Shot minimum measurement (Q7, measured in /to-spec)
+
+**Command** (read-only, run from the repo root on `claim-check-spec`, 7 Nov 2026; the script sits in `/tmp` and writes nothing):
+
+```bash
+uv run --no-project --python 3.12 --with-requirements requirements.txt python /tmp/claim-check-measure/shot_minimum.py
+```
+
+**What it counts.** For each Window and Line: every player with at least 1 qualifying season (≥ 900 minutes, not held for review) in the Window. Their non-penalty, non-own-goal shots in those seasons (`counts_for_metrics`), summed over the Window. Line comes from start minutes only, as Primary position ignores substitute appearances. The Window Line is the one with the most minutes, and a tie goes to the latest season (D2). The script loads 19,062 PlayerSeasons and 309,961 non-penalty, non-own-goal shots: 315,073 joined shot rows less penalties and own goals. Goalkeepers are left out, because every catalogue Claim on a goalkeeper is Can't check.
+
+**Reading the tables.** "removed by N (left)": how many players fall below N shots, and how many are left. A Reference group needs 30. "<30" marks a Line left with too few. Subjects and peers are the same population, so the count removed is both the subjects who'd get "too few shots" and the peers left out.
+
+#### Window 2017/18-2019/20
+
+| Line | players | median shots | p25 | p75 | removed by 20 (left) | removed by 30 (left) | removed by 40 (left) | removed by 50 (left) | removed by 60 (left) |
+|---|---|---|---|---|---|---|---|---|---|
+| Forward | 325 | 86 | 44 | 147 | 13 (312) | 39 (286) | 70 (255) | 89 (236) | 116 (209) |
+| Wide | 473 | 54 | 29 | 101 | 66 (407) | 123 (350) | 174 (299) | 212 (261) | 257 (216) |
+| Central AM | 84 | 54 | 28 | 85 | 9 (75) | 24 (60) | 35 (49) | 40 (44) | 47 (37) |
+| Central midfielder | 482 | 33 | 16 | 64 | 156 (326) | 213 (269) | 276 (206) | 320 (162) | 353 (129) |
+| Full-back | 474 | 17 | 8 | 34 | 266 (208) | 334 (140) | 372 (102) | 407 (67) | 437 (37) |
+| Centre-back | 492 | 17 | 8 | 31 | 273 (219) | 356 (136) | 416 (76) | 451 (41) | 470 (22 <30) |
+
+#### Window 2018/19-2020/21
+
+| Line | players | median shots | p25 | p75 | removed by 20 (left) | removed by 30 (left) | removed by 40 (left) | removed by 50 (left) | removed by 60 (left) |
+|---|---|---|---|---|---|---|---|---|---|
+| Forward | 335 | 81 | 38 | 143 | 19 (316) | 46 (289) | 88 (247) | 112 (223) | 133 (202) |
+| Wide | 431 | 56 | 29 | 102 | 50 (381) | 111 (320) | 158 (273) | 197 (234) | 226 (205) |
+| Central AM | 85 | 58 | 27 | 112 | 11 (74) | 24 (61) | 31 (54) | 38 (47) | 45 (40) |
+| Central midfielder | 494 | 32 | 16 | 59 | 160 (334) | 230 (264) | 288 (206) | 343 (151) | 370 (124) |
+| Full-back | 473 | 16 | 8 | 34 | 263 (210) | 330 (143) | 371 (102) | 411 (62) | 432 (41) |
+| Centre-back | 513 | 16 | 8 | 32 | 296 (217) | 368 (145) | 431 (82) | 471 (42) | 489 (24 <30) |
+
+#### Window 2019/20-2021/22
+
+| Line | players | median shots | p25 | p75 | removed by 20 (left) | removed by 30 (left) | removed by 40 (left) | removed by 50 (left) | removed by 60 (left) |
+|---|---|---|---|---|---|---|---|---|---|
+| Forward | 328 | 78 | 41 | 140 | 15 (313) | 46 (282) | 79 (249) | 108 (220) | 133 (195) |
+| Wide | 413 | 58 | 29 | 102 | 51 (362) | 104 (309) | 155 (258) | 189 (224) | 208 (205) |
+| Central AM | 96 | 51 | 26 | 97 | 13 (83) | 30 (66) | 38 (58) | 46 (50) | 53 (43) |
+| Central midfielder | 485 | 30 | 16 | 57 | 155 (330) | 242 (243) | 296 (189) | 334 (151) | 369 (116) |
+| Full-back | 472 | 18 | 10 | 35 | 247 (225) | 321 (151) | 378 (94) | 416 (56) | 430 (42) |
+| Centre-back | 528 | 16 | 7 | 31 | 296 (232) | 386 (142) | 450 (78) | 488 (40) | 502 (26 <30) |
+
+#### Window 2020/21-2022/23
+
+| Line | players | median shots | p25 | p75 | removed by 20 (left) | removed by 30 (left) | removed by 40 (left) | removed by 50 (left) | removed by 60 (left) |
+|---|---|---|---|---|---|---|---|---|---|
+| Forward | 347 | 72 | 39 | 138 | 13 (334) | 49 (298) | 89 (258) | 114 (233) | 141 (206) |
+| Wide | 437 | 55 | 28 | 99 | 55 (382) | 115 (322) | 172 (265) | 204 (233) | 228 (209) |
+| Central AM | 91 | 50 | 27 | 92 | 11 (80) | 26 (65) | 34 (57) | 44 (47) | 54 (37) |
+| Central midfielder | 492 | 31 | 16 | 62 | 163 (329) | 232 (260) | 292 (200) | 329 (163) | 359 (133) |
+| Full-back | 470 | 19 | 10 | 35 | 241 (229) | 324 (146) | 366 (104) | 393 (77) | 418 (52) |
+| Centre-back | 540 | 16 | 8 | 31 | 311 (229) | 393 (147) | 456 (84) | 491 (49) | 511 (29 <30) |
+
+#### Window 2021/22-2023/24
+
+| Line | players | median shots | p25 | p75 | removed by 20 (left) | removed by 30 (left) | removed by 40 (left) | removed by 50 (left) | removed by 60 (left) |
+|---|---|---|---|---|---|---|---|---|---|
+| Forward | 350 | 69 | 41 | 132 | 6 (344) | 48 (302) | 86 (264) | 114 (236) | 148 (202) |
+| Wide | 431 | 54 | 27 | 102 | 60 (371) | 117 (314) | 163 (268) | 201 (230) | 226 (205) |
+| Central AM | 110 | 52 | 29 | 103 | 14 (96) | 29 (81) | 41 (69) | 52 (58) | 59 (51) |
+| Central midfielder | 505 | 33 | 16 | 59 | 157 (348) | 229 (276) | 292 (213) | 338 (167) | 380 (125) |
+| Full-back | 467 | 21 | 11 | 38 | 224 (243) | 301 (166) | 356 (111) | 394 (73) | 418 (49) |
+| Centre-back | 536 | 17 | 8 | 32 | 301 (235) | 391 (145) | 440 (96) | 484 (52) | 512 (24 <30) |
+
+#### Window 2017/18-2023/24
+
+| Line | players | median shots | p25 | p75 | removed by 20 (left) | removed by 30 (left) | removed by 40 (left) | removed by 50 (left) | removed by 60 (left) |
+|---|---|---|---|---|---|---|---|---|---|
+| Forward | 521 | 97 | 44 | 213 | 20 (501) | 72 (449) | 118 (403) | 144 (377) | 183 (338) |
+| Wide | 690 | 68 | 30 | 154 | 85 (605) | 169 (521) | 232 (458) | 278 (412) | 318 (372) |
+| Central AM | 134 | 62 | 29 | 129 | 15 (119) | 36 (98) | 52 (82) | 58 (76) | 64 (70) |
+| Central midfielder | 777 | 42 | 18 | 91 | 208 (569) | 301 (476) | 372 (405) | 430 (347) | 468 (309) |
+| Full-back | 737 | 25 | 11 | 53 | 313 (424) | 416 (321) | 487 (250) | 543 (194) | 574 (163) |
+| Centre-back | 794 | 23 | 10 | 47 | 356 (438) | 473 (321) | 545 (249) | 607 (187) | 657 (137) |
+
+**Named test players, 2021/22-2023/24:** Haaland 304 shots over 3 seasons, De Bruyne 187, Rice 119. All three pass any tested minimum.
+
+**Finding.**
+- 60 shots leaves Centre-backs below 30 peers in 4 of the 5 three-season Windows.
+- 50 keeps every Line at 30 or more, but Centre-backs fall to 40-52 and Full-backs to 56-77.
+- 40 keeps the smallest Line, Centre-backs, at 76-96 in every three-season Window. It removes about a quarter of Forwards (70-89 of 325-350) and keeps 75%.
+
+**Proposed final minimum: 40 non-penalty shots in the Window** (unchanged from the starting value). It is the largest tested value that keeps every Line's Reference group at twice the 30-peer minimum or more in every Window. The bootstrap interval (ADR 0003) already makes small samples Borderline, so the minimum only has to stop degenerate cases. Status: proposed. Ahmed decides.
+
+## Spec
+
+### Problem Statement
+
+Pundits, headlines and fans make football claims ("Haaland is an elite finisher", "Arsenal play defensive football") that sound factual but are rarely checked against data, and the vague words in them ("elite", "defensive") have no fixed meaning. A reader can't tell whether a claim holds, holds in part, or can't be tested with public data at all. Ahmed has the Twin model's data and maths, but nothing that turns a sentence into a fair, traceable check.
+
+### Solution
+
+A private command-line tool, Claim Check. A reader types a Claim and gets one Verdict per Reading: Supported, Mixed, Not supported, or Can't check with this data, always with its reason.
+- Every Verdict shows the written threshold, the Subject's percentile and interval, the Reference group in plain words, the seasons used, and the versions of the word map, level scale and method.
+- The LLM only extracts words from the Claim and writes 2 guarded Summary lines. Deterministic code computes every number and decides every Verdict.
+- An outside model (Gemini) reviews the Verdicts, on fixed test claims and on headline claims collected by a fixed rule.
+
+### User Stories
+
+1. As a reader, I want to type a Claim in plain English, so that I can check it without knowing any metric names.
+2. As a reader, I want one of 4 fixed Verdicts, so that the answer is never a vague paragraph.
+3. As a reader, I want every Verdict to show its threshold in words ("Elite = top 10% of the peer group"), so that I know what the vague word was taken to mean.
+4. As a reader, I want the Subject's percentile and its range, so that I can see how close the call was.
+5. As a reader, I want the Reference group in plain words ("vs forwards in the top 5 leagues, 2021/22-2023/24, 900+ minutes per season"), so that I know who the Subject was compared with.
+6. As a reader, I want the seasons used and the data end date on every Verdict, so that I know it may not match the current season.
+7. As a reader, I want "Can't check with this data" with one reason, so that a gap in the data is never shown as a "no".
+8. As a reader, I want an ambiguous word ("defensive") checked under each meaning, with each meaning shown, so that the tool never picks a meaning for me.
+9. As a reader, I want a negated Claim ("isn't an elite finisher") to get the flipped Verdict, so that wording doesn't change the answer.
+10. As a reader, I want a Mixed Verdict to say why in one line, so that I know whether the seasons disagree or the range crosses the line.
+11. As a reader, I want skipped seasons listed with their reasons, and "Thin evidence" when fewer than half the Window's seasons remain, so that I know how much the Verdict rests on.
+12. As a reader, I want "Range not available: this metric has season totals only." on Chance creation and Build-up, so that I know those two have no bootstrap range.
+13. As a reader, I want 2 short Summary lines that never add a number or soften the Verdict, so that the summary can be trusted as much as the table.
+14. As a reader, I want a name that matches two players to list both and stop, so that I'm never shown the wrong player.
+15. As a reader, I want "in the Premier League" or "for a midfielder" to change the Reference group, so that a Claim's own comparison is honoured.
+16. As a reader, I want team Claims judged against the same league, and league Claims ranked among the 5 leagues, so that each Subject is compared like with like.
+17. As Ahmed, I want the word map and level scale as versioned tables in code, so that every Verdict can be traced to the exact rules it used.
+18. As Ahmed, I want an unmapped claim word logged in LangFuse, so that I can see which words the catalogue should grow to cover.
+19. As Ahmed, I want every step of a run traced in LangFuse, named in glossary words, so that any Verdict can be replayed.
+20. As Ahmed, I want a Fault (bad file, failed pin, outage, code error) to stop the run with an error, so that "Can't check" always means a data limit and never a bug.
+21. As Ahmed, I want two pin tests against Twin's measured numbers, so that Claim Check and Twin can never read the join differently.
+22. As Ahmed, I want Twin code left untouched, so that the Twin model and its validation stay exactly as they are.
+23. As Ahmed, I want verdict tests that run as pure code from a fixed Extraction, so that a rule change fails a named test with no network.
+24. As Ahmed, I want Extraction tests run against the LLM, so that a model change is caught on its own.
+25. As Ahmed, I want expected Verdicts written down before the first run, and reviewed by Gemini, so that the tests check the system and not its output.
+26. As Ahmed, I want the word map draft reviewed by Gemini before I approve it, so that my approval focuses on flagged lines.
+27. As Ahmed, I want 30 headline claims chosen by a fixed rule from Guardian headlines and standfirsts, so that neither of us picks the exam.
+28. As Ahmed, I want the Guardian API terms read and confirmed before any collection, so that no terms are broken.
+29. As Ahmed, I want a Consistency pass and a Blind plausibility pass by Gemini, with the coverage rate, so that I know whether Verdicts follow from their numbers and match football judgement.
+30. As Ahmed, I want no Verdict published until the #17 join retrospective is done, so that nothing goes out on a join with open questions.
+31. As Ahmed, I want each Verdict written as JSON under `build/private/claim_check/`, so that a later page can read it without the stand-in ever publishing.
+32. As a future live-data ticket (#15), I want the same rules to apply to live Understat, so that only the method version changes.
+
+### Implementation Decisions
+
+All decisions are in the grill record above (Q1-Q20, D1-D9) and ADRs 0001-0003. Their shape, in brief:
+
+- **Modules** (Claim Check context, one folder per layer, D8):
+  - **Domain:** Claim, Extraction (the fixed JSON shape), ClaimQuery, word map and level scale (versioned tables), Reference group rules, Line, the test and Verdict rule (ADR 0003), the fail-safe reason order, the Guard. No LangGraph, Groq, LangFuse or pandas imports. Tests run with no network.
+  - **Application:** the LangGraph graph, one node per step (D7): extract → resolve subjects → map words → build ClaimQuery → compute tests → decide Verdict → write Summary lines → guard → render.
+  - **Infrastructure:** the stand-in adapter (PlayerMatch, TeamMatch, read-only on Twin's join, ADR 0002), the Groq client behind an LLM interface, the LangFuse tracer, and later the Guardian and Gemini clients.
+  - **Interface:** the CLI `claim-check "<claim>"` and the Verdict JSON.
+- **Reused Twin code, unchanged:** PlayerSeason and Shot records, `percentiles`, `counts_for_metrics`, the stand-in loader and join functions.
+- **The Extraction shape** is fixed in "The Extraction and the word map", with `reference_named` (Q8).
+- **The Verdict JSON** holds: Claim, Extraction, each Reading's ClaimQuery, tests (value, percentile, interval or the 5-point band label), Verdict, reason, coverage line, Reference group line, Summary lines or "template fallback", and the word-map, level-scale, method, blocked-word and Groq model versions.
+- **Bootstrap:** 1,000 resamples, fixed seed, 80% interval. Matches for per-season tests, shots for Pooled tests, TeamMatches for teams and leagues (D4).
+- **Shot minimum** for Pooled metrics: 40, proposed above, for Ahmed's decision.
+- **Groq model:** one exact model id, pinned (D6).
+
+### Testing Decisions
+
+- A good test checks external behaviour only. Given an Extraction, the Verdict and its rendered facts are fixed. Tests never assert on internal helpers.
+- **Seam 1 (main): Extraction → Verdict JSON**, pure code, no network. Every synthetic verdict test (Part 2) and every real-data verdict test (Part 1, 1b) goes through it.
+- **Seam 2: Claim text → Extraction**, against the pinned Groq model (Part 3). The only tests that need the network.
+- **Seam 3: the stand-in adapter**, with the two pin tests.
+- **Prior art:** `tests/test_standin_loader.py` and `tests/test_build.py` for real-data runs and pinned numbers. `tests/test_domain_boundary.py` for "the domain imports no framework". `tests/test_twins.py` for percentile behaviour. The #6 spec's `synthetic` label for hand-made inputs, kept out of `tests/fixtures/`.
+
+### Out of Scope
+
+- Match and manager Subjects, comparison Claims' verdict rule, PPDA, pressing and deep completions, a web front end, BBC Sport RSS live input (all in "Later options").
+- Publishing any Verdict (gated on the #17 retrospective).
+- Any change to Twin code.
+- Live Understat (#15). The rules carry over with a method version change.
+
+### Further Notes
+
+- **Name clash to settle:** #30 added **Finishing** to Twin's glossary: npG − npxG per non-penalty shot for one PlayerSeason, shrunk by normal-normal (D30-2, D30-3). Claim Check's Finishing Claim type uses the same formula, but pooled over a Window and unshrunk, ranked against a Reference group. The Claim type name stays "Finishing" in this spec. A reader of both glossaries could take one for the other. Open for Ahmed.
+- Word map v1 is a draft until Ahmed's approval (Q20). No Verdict may cite it before then.
+
+## Tickets (/to-tickets, 7 Nov 2026)
+
+Parent spec issue: #36. All 15 tickets are sub-issues of #36, and their blocking edges are native GitHub dependencies.
+
+| # | Ticket | Label | Blocked by |
+|---|---|---|---|
+| #37 | Gemini review of the word map v1 draft | ready-for-agent | none |
+| #38 | Ahmed approves and freezes word map v1 and level scale v1 | needs-info | #37 |
+| #39 | Gemini review of expected Verdicts 1-6 | ready-for-agent | none |
+| #40 | Gate: read the Guardian API terms before headline collection | needs-info | none |
+| #41 | Gate: #17 join retrospective before any Verdict is published | needs-info | none |
+| #42 | Stand-in adapter with PlayerMatch, TeamMatch and two pin tests | ready-for-agent | none |
+| #43 | Pooled player Verdicts from an Extraction (tracer bullet) | ready-for-agent | #42 |
+| #44 | Per-season player Verdicts with match bootstrap | ready-for-agent | #43 |
+| #45 | Season-totals Verdicts with the 5-point band | ready-for-agent | #44 |
+| #46 | Team and league Verdicts, with Readings for ambiguous words | ready-for-agent | #43 |
+| #47 | Typed Claims end to end (Groq Extraction, LangGraph, LangFuse) | ready-for-agent | #43 |
+| #48 | Summary lines, the Guard and the template fallback | ready-for-agent | #47 |
+| #49 | Real-data verdict tests on frozen word map v1 | ready-for-agent | #38, #39, #44, #45, #46, #48 |
+| #50 | Collect 30 Headline claims from the Guardian API | ready-for-agent | #40 |
+| #51 | Outside review of Verdicts by Gemini (Pass A and Pass B) | ready-for-agent | #49, #50 |
+
+Frontier now: #37, #39, #40, #41, #42.
