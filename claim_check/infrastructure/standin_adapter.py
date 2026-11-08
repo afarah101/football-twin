@@ -31,6 +31,7 @@ class StandinMatches(NamedTuple):
     positions: pd.DataFrame  # the join's FBref rows, merged ids, one per appearance
     player_matches: tuple
     team_matches: tuple
+    unlinked_matches: int  # FBref matches with no Understat link, so no TeamMatch and no shots
 
 
 def substitute_rows(positions, events):
@@ -58,6 +59,16 @@ def team_matches(shot_records, groups, positions, linked):
             own, other = sums[(row.match, team)], sums[(row.match, opponent)]
             records.append(TeamMatch(row.league, int(row.Season_End_Year) - 1, row.match, team, opponent, own[0], other[0], own[1], other[1], own[2], other[2]))
     return tuple(records)
+
+
+def unlinked_matches(positions, linked):
+    return len(set(positions["match"]) - set(linked))
+
+
+def check_lines(player_matches):
+    """Every start's Line, read once at load, so a label outside the Line table stops the run (UnknownPosition)."""
+    for found in player_matches:
+        found.line
 
 
 def check_pins(loaded, player_matches):
@@ -95,5 +106,7 @@ def load_matches(files=StandinFiles(), season_checks=True):
             positions["league"], positions["Season_End_Year"], positions["match"], positions["fbref_id"], positions["Team"], positions["Min"], positions["Pos"], substitutes,
         )
     )
+    check_lines(player_matches)
     check_pins(run.loaded, player_matches)
-    return StandinMatches(run.loaded, positions, player_matches, team_matches(shot_records, groups, positions, set(linked.values())))
+    matches = set(linked.values())
+    return StandinMatches(run.loaded, positions, player_matches, team_matches(shot_records, groups, positions, matches), unlinked_matches(positions, matches))

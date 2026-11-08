@@ -21,7 +21,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from claim_check.domain.records import LINE_OF_POSITION, SET_PIECE_SITUATIONS, PlayerMatch, TeamMatch
+from claim_check.domain.records import LINE_OF_POSITION, SET_PIECE_SITUATIONS, PlayerMatch, TeamMatch, UnknownPosition
 from claim_check.infrastructure import standin_adapter as adapter
 from twin.domain.pool import in_pool
 from twin.infrastructure.standin import player_join as join
@@ -187,6 +187,27 @@ class Pins(SampleRun):
         with self.assertRaises(adapter.PinFailed) as stop:
             adapter.check_pins(self.matches.loaded, records)
         self.assertIn("pin 2", str(stop.exception))
+
+
+class ReviewFixes(SampleRun):
+    """#42's review, fixed in #43."""
+
+    def test_synthetic_a_start_with_a_label_not_in_the_line_table_stops_the_run(self):
+        # synthetic: no label outside the Line table is in today's data, so one is made up.
+        start = PlayerMatch("p1", "ENG", 2022, "m1", "Club", 90, "ZZ", False, ())
+        with self.assertRaises(UnknownPosition) as stop:
+            start.line
+        self.assertIn("ZZ", str(stop.exception))
+        with self.assertRaises(UnknownPosition):
+            adapter.check_lines([start])  # load_matches runs this on every record
+        self.assertIsNone(dataclasses.replace(start, substitute=True).line)  # a substitute's label never sets a Line
+        adapter.check_lines(self.matches.player_matches)  # every real label is in the table
+
+    def test_the_adapter_reports_matches_left_out_because_they_are_not_linked(self):
+        linked = {found.match for found in self.matches.team_matches}
+        self.assertEqual(self.matches.unlinked_matches, self.matches.positions["match"].nunique() - len(linked))
+        # synthetic: one real match taken out of the linked set is counted as left out.
+        self.assertEqual(adapter.unlinked_matches(self.matches.positions, linked - {min(linked)}), self.matches.unlinked_matches + 1)
 
 
 @unittest.skipUnless((FULL / "MANIFEST.md").is_file(), "data/standin/ is private and absent here")
