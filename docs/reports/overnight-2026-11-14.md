@@ -10,11 +10,11 @@ Queue: #43 → #44 → #46 → #45 → #29 → #12 → #10. One issue per PR. St
 | #44 per-season player Verdicts | needs-ahmed | [#59](https://github.com/afarah101/football-twin/pull/59) | The Availability denominator (minutes / 90 × the most club matches in the league-season). |
 | #46 team and league Verdicts | needs-ahmed | [#60](https://github.com/afarah101/football-twin/pull/60) | The new fail-safe reason "too few matches", and the rule that a league rank meets only if the whole range is inside the top k. |
 | #45 season-totals Verdicts | needs-ahmed | [#61](https://github.com/afarah101/football-twin/pull/61) | The Mixed reason "within 5 points of the line" for the 5-point band. |
-| #29 career twins, 1,350-minute rule | blocked | — | Close #29 as superseded by #30. #30's recorded career rule (6,000+ minutes, D30-1) replaces #29's rule. See [the #29 comment](https://github.com/afarah101/football-twin/issues/29#issuecomment-6868864333). |
+| #29 career twins, 1,350-minute rule | needs-ahmed | [#65](https://github.com/afarah101/football-twin/pull/65) | Choose the career rule: #29 (1,350+ minute seasons in 3+ seasons, 342 careers) or #30's D30-1 (6,000 minutes, 338 careers, on `main`). Merge #65 for #29, or close it. |
 | #12 site map | needs-ahmed | [#63](https://github.com/afarah101/football-twin/pull/63) | The map's look on the season view (a public site change). |
 | #10 validation report, local parts | needs-ahmed | [#64](https://github.com/afarah101/football-twin/pull/64) | **The stand-in self-match FAILS:** 7.8% for the winner (cosine) against the 40% target. Q12 says do not launch. |
 
-Merge order: #59, then #60, then #61. Each PR is built on the one before it, and GitHub moves the base when the PR below it merges. #63 and #64 are on `main` and do not depend on each other.
+Merge order: #59, then #60, then #61. Each PR is built on the one before it, and GitHub moves the base when the PR below it merges. #63, #64 and #65 are on `main`. #63 and #65 both touch `site/index.html` and `tests/test_site_data.py`, so the second one to merge may need `main` merged in.
 
 ## Notes outside the issues' scope (not fixed)
 
@@ -27,10 +27,11 @@ Merge order: #59, then #60, then #61. Each PR is built on the one before it, and
 ### Code Review: YES
 
 - **Only the issue's files:** YES. Every PR changed only its issue's files.
+  - #29 changed the Twin tests that need sample careers or exact twin lists: they now lower the new rules to the Pool's 900 minutes, as they lowered the 6,000 bar before.
   - #12 and #10 also changed one test helper each. `data_files` and `built_files` now leave out the new map file. This is needed for the existing tests to read only league-season files.
   - The #45 PR also changed one old test that expected #45 not to be built.
 - **Tests for new behaviour:** YES.
-  - #44: 14 tests. #46: 21. #45: 6. #12: 6, plus smoke checks. #10: 10.
+  - #44: 14 tests. #46: 21. #45: 6. #29: 2 new. #12: 6, plus smoke checks. #10: 10.
   - Claim Check tests are synthetic. Twin tests use the loader sample, or are named `hand_made` where the sample has 0 real cases (the rule in `tests/test_build.py`).
 - **Verify checks green:** YES. When this report was written, `verify` and `review` had passed on #58-#62. #63 and #64 were re-run after review fixes.
   - All Claude reviews said VERDICT: OK. None found a Critical issue.
@@ -54,7 +55,7 @@ Merge order: #59, then #60, then #61. Each PR is built on the one before it, and
   - The reason "season totals missing".
   - The method version names the band (stand-in-3).
   - Its needs-ahmed choices are listed in #61 (3 choices).
-- **#29**: not built, because it is superseded. Building it would reverse D30-1, which is recorded.
+- **#29** (#65): 7 of 7 criteria met. The spec came in the same PR, not before the code (noted in the spec). needs-ahmed because it replaces D30-1.
 - **#12** (#63): every criterion met: the PCA map file, the marked player and twins, no axis named, the same-league filter, and a passing smoke test. needs-ahmed because it changes the public site.
 - **#10** (#64): **2 of 9 criteria are not met.** The outside review and the blind spot-check need a non-Claude model key, which this queue may not use, so the PR does not close #10. Its needs-ahmed choices are listed in #64 (Wilson interval, baseline, stint rule, stability sampling, tie-break).
 
