@@ -1,7 +1,8 @@
 """CareerProfiles and their twin lists (#30): one person's Pool PlayerSeasons, averaged over the career.
 
 A CareerProfile is the minutes-weighted mean of the person's season MetricProfiles, each stint with its own minutes and its
-own PeerGroup z-scores (decisions 1 and 8, D30-7). Only a person with 6,000+ career minutes has one (D30-1). Its role group
+own PeerGroup z-scores (decisions 1 and 8, D30-7). #29: only twin-eligible stints (1,350+ minutes) count, and a person needs
+them in 3+ different seasons to have one (this replaces D30-1's 6,000 career minutes; Ahmed decides). Its role group
 is the one with the most career minutes (D30-4). Career closeness is against all career pairs (decision 3), on both lists,
 so a twin keeps its closeness when the role filter toggles (D30-9). The role filter is the only career filter (D30-5). Percentiles for the Fingerprint are among all careers (D30-6).
 """
@@ -10,9 +11,10 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from twin.domain.twins import CANDIDATE_METHODS, DISTANCE_DECIMALS, TOP, distance_matrix, percentiles
+from twin.domain.twins import CANDIDATE_METHODS, DISTANCE_DECIMALS, TOP, TWIN_MINUTES, distance_matrix, percentiles
 
-CAREER_MINUTES = 6000  # D30-1
+CAREER_MINUTES = 0  # #29: no career-minutes bar; D30-1's 6,000 is replaced by the two rules below (needs Ahmed: #29 v D30-1)
+CAREER_SEASONS = 3  # #29 decision 3: twin-eligible seasons in 3 or more different seasons
 ROLE_GROUPS = {"FW": "Forward", "LW": "Wide", "RW": "Wide", "AM": "Central AM"}  # #30 decision 7
 
 
@@ -62,10 +64,12 @@ def role_group(profiles):
     return next(ROLE_GROUPS[profile.player_season.display_position] for profile in reversed(profiles) if minutes[ROLE_GROUPS[profile.player_season.display_position]] == most)
 
 
-def career_profiles(peer_groups, career_minutes=CAREER_MINUTES):
-    """{(league, season): [MetricProfile]} to the CareerProfiles at or above `career_minutes`, by player_id.
+def career_profiles(peer_groups, career_minutes=CAREER_MINUTES, eligible_minutes=TWIN_MINUTES, career_seasons=CAREER_SEASONS):
+    """{(league, season): [MetricProfile]} to the CareerProfiles, by player_id.
 
-    `career_minutes` is the bar. Only tests set it lower, because the cut sample holds no 6,000-minute career.
+    #29: a career averages only the twin-eligible stints (`eligible_minutes`, decisions 1-2), and needs them in `career_seasons`
+    different seasons (decision 3). `career_minutes` is an extra total bar, 0 under #29. Only tests set the rules lower,
+    because the cut sample holds partial seasons.
     """
     seasons = defaultdict(list)
     for members in peer_groups.values():
@@ -73,7 +77,10 @@ def career_profiles(peer_groups, career_minutes=CAREER_MINUTES):
             seasons[profile.player_season.player_id].append(profile)
     found = []
     for player_id, profiles in sorted(seasons.items()):
-        profiles.sort(key=lambda profile: (profile.player_season.season, profile.player_season.league))
+        profiles = sorted((profile for profile in profiles if profile.player_season.minutes >= eligible_minutes),
+                          key=lambda profile: (profile.player_season.season, profile.player_season.league))
+        if len({profile.player_season.season for profile in profiles}) < max(career_seasons, 1):
+            continue
         weights = np.array([profile.player_season.minutes for profile in profiles], dtype=float)
         minutes = int(weights.sum())
         if minutes < career_minutes:

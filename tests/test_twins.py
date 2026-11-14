@@ -11,11 +11,13 @@ import sys
 import unittest
 from functools import lru_cache
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests"))
 from test_build import built_files, loaded
+from twin.application import build
 from twin.domain import profiles, twins
 
 SALAH = "e342ad68"
@@ -24,7 +26,18 @@ TWIN_KEYS = {"player_id", "name", "league", "season", "minutes", "distance", "cl
 
 @lru_cache(maxsize=None)
 def entries():
-    """Every Pool entry of the build files, as {(league, season, player_id): entry}."""
+    """Every Pool entry of the build files, as {(league, season, player_id): entry}.
+
+    The cut sample holds partial seasons, so these exact-list tests build with the twin rule at the Pool's own 900 minutes.
+    `default_entries` keeps #29's 1,350.
+    """
+    with mock.patch.object(build, "twin_lists", lambda groups: twins.twin_lists(groups, twin_minutes=900)):
+        files = built_files()
+    return {(content["league"], content["season"], entry["player_id"]): entry for content in files.values() for entry in content["player_seasons"]}
+
+
+@lru_cache(maxsize=None)
+def default_entries():
     return {(content["league"], content["season"], entry["player_id"]): entry for content in built_files().values() for entry in content["player_seasons"]}
 
 
@@ -85,7 +98,22 @@ def plain_closeness(method, distance, league=None):
 
 
 def domain_lists():
-    return twins.twin_lists(peer_groups())
+    return twins.twin_lists(peer_groups(), twin_minutes=900)  # the Pool's own rule: the cut sample holds partial seasons
+
+
+class TwinMinutes(unittest.TestCase):
+    def test_no_twin_under_1350_minutes_in_any_list(self):
+        self.assertEqual(twins.TWIN_MINUTES, 1350)  # #29 decision 2
+        records = {found.key: found for found in loaded().player_seasons}
+        listed = [found for entry in default_entries().values() for lists in entry["twins"].values() for found in lists["all_leagues"] + lists["same_league"]]
+        self.assertTrue(listed)
+        self.assertTrue(all(found["minutes"] >= 1350 for found in listed))
+        # real: the sample's Pool holds seasons under 1,350, so the rule removes some twins, and they still get their own lists.
+        short = [key for key in default_entries() if records[key].minutes < 1350]
+        self.assertTrue(short)
+        self.assertTrue(all(default_entries()[key]["twins"]["euclidean"]["all_leagues"] for key in short))
+        for method, lists in twins.twin_lists(peer_groups()).items():
+            self.assertTrue(all(match.player_season.minutes >= 1350 for found in lists.values() for match in found.all_leagues + found.same_league), method)
 
 
 class TwinLists(unittest.TestCase):

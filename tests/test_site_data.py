@@ -47,9 +47,9 @@ HOW_IT_WORKS = (  # #30 decision 11, with the D30-1 bar
     "nearest match",
     "Attacking style only",
     "Data 2017/18-2023/24",
-    "Careers need 6,000+ minutes",
+    "Careers need 1,350+ minutes in each of 3+ seasons",
 )
-CAREER_BAR = 900  # the cut sample holds no 6,000-minute career, so tests lower the bar to the Pool's 900, as in B1
+CAREER_BAR = 900  # the cut sample holds no #29 career, so tests lower the rules to the Pool's 900, as in B1
 CAREER_FILE_KEYS = {"player_id", "name", "role_group", "first_season", "last_season", "season_count", "minutes", "metrics", "percentiles", "player_seasons", "twins"}
 CAREER_TWIN_KEYS = {"player_id", "name", "role_group", "first_season", "last_season", "season_count", "minutes", "closeness"}
 
@@ -57,7 +57,7 @@ CAREER_TWIN_KEYS = {"player_id", "name", "role_group", "first_season", "last_sea
 @contextmanager
 def career_bar(minutes):
     """The Build with a lower career bar. Real sample records only; just the bar moves."""
-    with mock.patch.object(build, "career_profiles", lambda groups: careers.career_profiles(groups, career_minutes=minutes)), mock.patch.object(build, "CAREER_MINUTES", minutes):
+    with mock.patch.object(build, "career_profiles", lambda groups: careers.career_profiles(groups, career_minutes=minutes, eligible_minutes=minutes, career_seasons=1)), mock.patch.object(build, "CAREER_MINUTES", minutes):
         yield
 
 
@@ -189,7 +189,7 @@ class TwinsData(unittest.TestCase):
 
 class CareerData(unittest.TestCase):
     def test_names_and_season_files_say_which_players_have_a_career(self):
-        # Real: at 6,000 minutes no sample player has a career, so every search opens season twins (D30-8).
+        # Real: under the #29 rules no sample player has a career, so every search opens season twins (D30-8).
         self.assertEqual({entry["career"] for entry in names()}, {False})
         self.assertEqual(career_files(sample_site), {})
         self.assertEqual({entry["career"] for content in data_files().values() for entry in content["player_seasons"]}, {False})
@@ -199,7 +199,7 @@ class CareerData(unittest.TestCase):
         self.assertEqual({entry["career"] for content in data_files(career_site).values() for entry in content["player_seasons"]}, {True})
 
     def test_career_file_holds_the_site_method_lists_and_percentiles(self):
-        found = careers.career_profiles(profiles.peer_group_profiles(loaded().player_seasons, loaded().shots), career_minutes=CAREER_BAR)
+        found = careers.career_profiles(profiles.peer_group_profiles(loaded().player_seasons, loaded().shots), career_minutes=CAREER_BAR, eligible_minutes=CAREER_BAR, career_seasons=1)
         lists = careers.career_lists(found)[site_data.SITE_METHOD]  # D30-10: the site shows Euclidean
         percentiles = careers.career_percentiles(found)
         seasons = data_files(career_site)
