@@ -26,3 +26,9 @@ svg .bar.above { fill: #2a6fb0; }
 svg .bar.below { fill: #c26a2d; }
 footer { margin-top: 40px; padding-bottom: 24px; font-size: 0.9rem; color: #4a5560; border-top: 1px solid #d5dbe0; }
 footer a { color: #2a6fb0; }
+
+/* #12: the Pool map */
+#pool-map { width: 100%; max-width: 360px; }
+.map-point { fill: currentColor; opacity: 0.2; }
+.map-twin { fill: none; stroke: currentColor; stroke-width: 1.5; }
+.map-player { fill: currentColor; }

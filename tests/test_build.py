@@ -40,8 +40,8 @@ def written_files(source=None):
 
 
 def built_files(source=None):
-    """The league-season files only."""
-    return {path: content for path, content in written_files(source).items() if not path.endswith(build.CAREER_FILE)}
+    """The league-season files only (not the career file or the #12 map file)."""
+    return {path: content for path, content in written_files(source).items() if not path.endswith((build.CAREER_FILE, build.MAP_FILE))}
 
 
 def peer_group_file():

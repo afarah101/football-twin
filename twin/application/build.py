@@ -11,11 +11,13 @@ Usage: python3 -m twin.application.build  (the stand-in run, into build/private/
 import json
 from pathlib import Path
 
+from twin.domain.pool_map import pca_points, pca_summary
 from twin.domain.careers import CAREER_MINUTES, career_lists, career_percentiles, career_profiles
 from twin.domain.profiles import METRICS, peer_group_profiles
 from twin.domain.twins import CANDIDATE_METHODS, twin_lists
 
 BUILD = Path(__file__).resolve().parent.parent.parent / "build"
+MAP_FILE = "map.json"  # #12: the Pool map, its own file
 CAREER_FILE = "careers.json"  # beside the league-season files; write_files returns only those, which the site reads
 
 
@@ -96,6 +98,8 @@ def write_files(loaded, folder):
         path.write_text(json.dumps(profile_file(loaded, league, season, profiles, lists, career_ids), ensure_ascii=False, indent=1) + "\n", encoding="utf8")
         written.append(path)
     (folder / CAREER_FILE).write_text(json.dumps(career_file(loaded, careers, CAREER_MINUTES), ensure_ascii=False, indent=1) + "\n", encoding="utf8")
+    map_points = {"source": loaded.source, "columns": ["league", "season", "player_id", "x", "y"], "points": [list(point) for point in pca_points(peer_groups)]}
+    (folder / MAP_FILE).write_text(json.dumps(map_points, ensure_ascii=False) + "\n", encoding="utf8")
     return written
 
 
@@ -115,7 +119,11 @@ if __name__ == "__main__":
     from twin.application.site_data import write_site
     from twin.infrastructure.standin.loader import StandinLoader
 
-    paths = run(StandinLoader().load())
+    source = StandinLoader().load()
+    paths = run(source)
+    shares, loadings = pca_summary(peer_group_profiles(source.player_seasons, source.shots))
+    for index, (share, row) in enumerate(zip(shares, loadings)):  # plan step 6: printed for the report, never named on the site
+        print(f"map component {index + 1}: {share:.1%} of variance; loadings " + ", ".join(f"{metric} {value:+.2f}" for metric, value in zip(METRICS, row)))
     for path in paths:
         print(path.relative_to(BUILD.parent))
     print(write_site(paths).relative_to(BUILD.parent))
