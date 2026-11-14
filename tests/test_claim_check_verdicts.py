@@ -22,6 +22,7 @@ from claim_check.domain.records import PlayerMatch
 from claim_check.domain.verdicts import check
 from claim_check.interface import cli
 from twin.domain.records import PlayerSeason, Shot
+from claim_check.domain.word_map import TOP_25, Reading
 
 DOMAIN = ROOT / "claim_check" / "domain"
 CLAIM = "X is an elite finisher"
@@ -242,11 +243,11 @@ class CantCheck(unittest.TestCase):
         # Subject not in data (3) and a word not in the catalogue (4) and a season not in data (6): reason 3.
         self.assert_reason(extraction(name="Nobody", words=["majestic"], seasons_named="in 2015/16"), "subject not in data")
 
-    def test_synthetic_a_claim_type_this_ticket_does_not_build_stops_with_an_error(self):
-        # Chance creation is a season-totals Claim type (#45), not built yet: an error, never a wrong Verdict.
-        # (Until #44 this test used Goalscoring, which #44 now builds.)
+    def test_synthetic_a_claim_type_with_no_verdict_path_stops_with_an_error(self):
+        # Every catalogue Claim type is built by #45, so this uses a made-up Reading: an error, never a wrong Verdict.
+        reading = Reading("Not a claim type", "more", TOP_25, None)
         with self.assertRaises(NotImplementedError):
-            self.world.check(extraction(words=["creative"]))
+            verdicts.reading_verdict(reading, *[None] * 10)
 
 
 class PooledClaimTypes(unittest.TestCase):
