@@ -39,6 +39,10 @@ def render(verdict):
             test, low, high = found.test, *found.test.interval
             lines.append(f"  {verdict.subject}: {ordinal(test.percentile)} percentile (range {ordinal(low)}-{ordinal(high)}): {test.outcome}")
             lines.append(f"  Value: {test.value_words}, on {test.shots} shots.")
+        for test in found.tests:
+            low, high = test.interval
+            lines.append(f"  {test.label}: {test.value_words}, {ordinal(test.percentile)} percentile (range {ordinal(low)}-{ordinal(high)}) "
+                         f"vs {test.reference_size} peers, {test.matches} matches: {test.outcome}")
         if found.reference_group:
             lines.append(f"  {found.reference_group}")
         if found.seasons:
