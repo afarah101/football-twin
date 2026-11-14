@@ -5,6 +5,7 @@ Rules: Reference groups (Q7, D1-D2), the shot minimum (Q7), the bootstrap and st
 Claim types come in #44, #45 and #46: until then they stop with an error, never a Verdict.
 Per-season player Verdicts (#44): Shot volume, Goal threat, Goalscoring, Aerial threat (2 Main metrics) and Availability.
 Each qualifying season is a test against that season's Reference group (D1), bootstrapped over the Subject's PlayerMatches.
+Team and league Verdicts (#46) live in claim_check/domain/team_verdicts.py; check() routes a team or league Subject there.
 """
 import random
 from collections import Counter, defaultdict
@@ -32,7 +33,7 @@ REASONS = (  # the fail-safe check order (spec "Fail-safe for missing data"): th
     "could not read the claim", "subject type not covered", "subject not in data", "subject is ambiguous",
     "claim word not in catalogue", "peer group not in catalogue", "level word does not fit a 5-league comparison",
     "metric not in data", "no injury data", "season not in data", "too few minutes", "held for review", "too few shots",
-    "season totals missing", "peer group too small",
+    "season totals missing", "too few matches", "peer group too small",
 )
 LINE_WORDS = {"Forward": "forwards", "Wide": "wide players", "Central AM": "central attacking midfielders", "Central midfielder": "central midfielders",
               "Full-back": "full-backs", "Centre-back": "centre-backs", "Goalkeeper": "goalkeepers"}
@@ -112,6 +113,7 @@ class Test:
     label: Optional[str] = None  # per-season tests: the season, and the Main metric when there are 2
     matches: Optional[int] = None  # per-season tests: the PlayerMatches resampled
     reference_size: Optional[int] = None  # per-season tests: that season's peers
+    rank: Optional[int] = None  # league tests: the rank among the 5; interval then holds the rank range (D4)
 
 
 @dataclass(frozen=True)
@@ -142,6 +144,7 @@ class ReadingVerdict:
     thin: bool = False
     seasons_alone: tuple = ()  # context only, never the Verdict
     tests: tuple = ()  # per-season Claim types: one Test per qualifying season (and per Main metric)
+    meaning: Optional[str] = None  # an ambiguous word's meaning for this Reading (Q4)
 
 
 @dataclass(frozen=True)
@@ -195,7 +198,15 @@ def bootstrap(shots, metric, peer_values, direction):
     return found[tail], found[RESAMPLES - 1 - tail]
 
 
-def check(claim, raw, player_seasons, player_matches):
+def window_of(extraction):
+    """The Window's start years, or the named season text when none of it is in the data."""
+    if extraction.seasons_named:
+        first, last = season_span(extraction.seasons_named)
+        return tuple(season for season in SEASONS if first <= season <= last) or extraction.seasons_named
+    return PRESENT if extraction.tense == "present" else SEASONS
+
+
+def check(claim, raw, player_seasons, player_matches, team_matches=()):
     """The Verdict for one Claim's Extraction. A Fault (bad data, a code error, a Claim type not built yet) raises; it is never a Verdict."""
     def cant(reason, detail=None, subject=None, polarity=None, warning=None):
         return ClaimVerdict(claim, raw, subject, polarity, (ReadingVerdict(None, CANT, reason, detail),), warning)
@@ -211,8 +222,10 @@ def check(claim, raw, player_seasons, player_matches):
     if extraction.form == "comparison":
         raise NotImplementedError("comparison Claims: the verdict rule is still to design (Q5)")
     (subject,) = extraction.subjects
-    if subject.kind != "player":
-        raise NotImplementedError(f"{subject.kind} Claims come in #46")
+    if subject.kind in ("team", "league"):
+        from claim_check.domain.team_verdicts import check_league, check_team
+        found = check_team if subject.kind == "team" else check_league
+        return found(claim, raw, extraction, subject, team_matches, polarity, warning, window_of)
     people = resolve(subject.name, player_seasons)
     if not people:
         return cant("subject not in data", subject.name, polarity=polarity, warning=warning)
@@ -235,13 +248,9 @@ def check(claim, raw, player_seasons, player_matches):
         return subject_cant(*min(reasons, key=lambda found: REASONS.index(found[0])))
     readings, (league, named_line) = problems[0][1], problems[1][1]
 
-    if extraction.seasons_named:
-        first, last = season_span(extraction.seasons_named)
-        window = tuple(season for season in SEASONS if first <= season <= last)
-        if not window:
-            return subject_cant("season not in data", extraction.seasons_named)
-    else:
-        window = PRESENT if extraction.tense == "present" else SEASONS
+    window = window_of(extraction)
+    if isinstance(window, str):
+        return subject_cant("season not in data", window)
     if league == SUBJECT_LEAGUE:  # "in the league": the Subject's league in the Window's latest season it played
         own = [found for found in player_seasons if found.player_id == person and found.season in window]
         league = max(own, key=lambda found: (found.season, found.minutes)).league if own else None

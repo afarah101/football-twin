@@ -31,11 +31,17 @@ def render(verdict):
         lines.append("Negated Claim: Supported and Not supported are swapped.")
     for found in verdict.readings:
         lines.append(f"{found.claim_type or 'Verdict'}: {found.verdict}" + (f" ({found.reason})" if found.reason else ""))
+        if found.meaning:
+            lines.append(f"  Reading: {found.meaning}")
         if found.detail:
             lines.append(f"  {found.detail}")
         if found.threshold:
             lines.append(f"  {found.threshold}")
-        if found.test:
+        if found.test and found.test.rank is not None:
+            test, best, worst = found.test, *found.test.interval
+            lines.append(f"  {verdict.subject}: rank {test.rank} of {test.reference_size} (range {best}-{worst}): {test.outcome}")
+            lines.append(f"  Value: {test.value_words}, on {test.matches} team matches.")
+        elif found.test:
             test, low, high = found.test, *found.test.interval
             lines.append(f"  {verdict.subject}: {ordinal(test.percentile)} percentile (range {ordinal(low)}-{ordinal(high)}): {test.outcome}")
             lines.append(f"  Value: {test.value_words}, on {test.shots} shots.")
