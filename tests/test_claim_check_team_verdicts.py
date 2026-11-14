@@ -72,6 +72,7 @@ class TeamVerdicts(unittest.TestCase):
         self.assertEqual((verdict.subject, reading.verdict), ("Solid Town", SUPPORTED))
         self.assertEqual(len(reading.tests), 1)
         self.assertEqual(reading.reference_size, TEAMS - 1)
+        self.assertEqual(reading.tests[0].shots, MATCHES * 10)  # Defence counts the shots against (10 a match)
         self.assertIn("vs the other full-season teams in the Premier League", render(verdict))
 
     def test_synthetic_negated_claim_swaps_the_verdict(self):
@@ -108,6 +109,7 @@ class TeamVerdicts(unittest.TestCase):
         reading = run(world, words=["clinical"], tense="past").readings[0]
         self.assertEqual((reading.claim_type, reading.verdict), ("Team finishing", SUPPORTED))
         self.assertEqual(reading.test.matches, MATCHES)
+        self.assertIn("partial seasons included", reading.coverage)
 
     def test_synthetic_a_line_phrase_does_not_fit_a_team(self):
         verdict = run(league_world(), reference_named="for a midfielder")

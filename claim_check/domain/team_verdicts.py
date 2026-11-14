@@ -173,7 +173,8 @@ def season_team(reading, team, league, window, played, is_full, polarity):
         value = metric.value(matches)
         point = percentile_of(value, peer_values, reading.direction)
         low, high = resampled(matches, metric.value, lambda found: percentile_of(found, peer_values, reading.direction))
-        tests.append(v.Test(value, metric.unit.format(value), sum(m.shots_for for m in matches), point, (low, high),
+        against = reading.claim_type in ("Defence", "Set-piece defence")  # these Main metrics are about the opponent's shots
+        tests.append(v.Test(value, metric.unit.format(value), sum(m.shots_against if against else m.shots_for for m in matches), point, (low, high),
                             reading.threshold.outcome(low, high, len(peers) + 1), v.season_label(season), len(matches), len(peers)))
         for name, measure in TEAM_CONTEXT.get(reading.claim_type, ()):
             context.append(f"{v.season_label(season)}: {name} {measure(matches):.2f}" if "share" not in name else f"{v.season_label(season)}: {name} {measure(matches):.0%}")
@@ -204,7 +205,7 @@ def pooled_team(reading, team, league, window, played, is_full, polarity):
     seasons = sorted(key[1] for key in played if key[0] == league and key[2] == team)
     peers = sorted(qualifying - {team})
     peer_values = [metric.value(in_league[other]) for other in peers]
-    coverage = f"Based on {len(seasons)} of {len(window)} season{'s' if len(window) > 1 else ''}."
+    coverage = f"Based on {len(seasons)} of {len(window)} season{'s' if len(window) > 1 else ''}, partial seasons included (Pooled)."
     reference = f"vs teams in {LEAGUE_NAMES[league]}, {v.window_label(window)}, 1+ full season: {len(peers)} teams"
     common = dict(claim_type=reading.claim_type, threshold=team_threshold(reading, metric.name), seasons=v.window_label(window), coverage=coverage,
                   thin=len(seasons) < len(window) / 2, reference_group=reference, reference_size=len(peers), meaning=reading.meaning)
