@@ -388,8 +388,11 @@ def season_verdict(reading, latest, person, window, league, line, lines, in_scop
         # One season, one test: a Subject qualifying in 2 leagues in a season is tested on the league with more minutes.
         key = max(own_keys, key=lambda key: sum(found.minutes for found in matches_of[key]))
         matches, count = matches_of[key], season_matches[(key[0], key[1])]
-        peers = [peer_key for player, peer_line in lines.items() if player != person and peer_line == line
-                 for peer_key in keys_of[player] if peer_key[1] == season]
+        peers = []  # one test per peer too: a peer in 2 leagues in the season counts once, in the league with more minutes
+        for player, peer_line in lines.items():
+            found = [peer_key for peer_key in keys_of[player] if peer_key[1] == season] if player != person and peer_line == line else []
+            if found:
+                peers.append(max(found, key=lambda peer_key: sum(match.minutes for match in matches_of[peer_key])))
         if len(peers) < PLAYER_REFERENCE_MINIMUM:
             skipped.append(f"{season_label(season)} peer group too small ({len(peers)} peers)")
             continue
