@@ -1,7 +1,7 @@
 """CareerProfiles and career twin lists (#30), on tests/fixtures/standin/loader_sample/.
 
 The sample is cut as whole matches, so its careers are short: the longest is Mohamed Salah's, 3,611 Pool minutes over
-ENG 2017/18 (2,414) and ENG 2023/24 (1,197). No real sample career reaches the 6,000-minute bar (D30-1). So the bar is
+ENG 2017/18 (2,414) and ENG 2023/24 (1,197). No real sample player has 3 seasons of 1,350+ minutes (#29). So the bar is
 tested at its edge on Salah, and the rest runs the same code with the bar at the Pool's own 900 minutes, which turns each
 of the sample's 29 real Pool players into a career. Every value is checked against a plain-Python version written here.
 The sample holds no career with seasons in two role groups, so the most-minutes rule is checked on single-group careers.
@@ -25,7 +25,8 @@ SALAH_MINUTES = 3611  # real: 2,414 + 1,197
 
 @lru_cache(maxsize=None)
 def sample_careers():
-    return careers.career_profiles(peer_groups(), career_minutes=POOL_BAR)
+    # The cut sample holds partial seasons, so the #29 rules are lowered to the Pool's own: every stint counts, 1 season is enough.
+    return careers.career_profiles(peer_groups(), career_minutes=POOL_BAR, eligible_minutes=POOL_BAR, career_seasons=1)
 
 
 @lru_cache(maxsize=None)
@@ -55,11 +56,14 @@ def plain_closeness(method, distance):
 
 
 class CareerBar(unittest.TestCase):
-    def test_the_bar_is_6000_career_minutes_and_inclusive(self):
-        self.assertEqual(careers.CAREER_MINUTES, 6000)  # D30-1
-        self.assertEqual(careers.career_profiles(peer_groups()), [])  # real: no sample career reaches 6,000
-        self.assertEqual([career.player_id for career in careers.career_profiles(peer_groups(), career_minutes=SALAH_MINUTES)], [SALAH])
-        self.assertEqual(careers.career_profiles(peer_groups(), career_minutes=SALAH_MINUTES + 1), [])
+    def test_the_29_rules_1350_minute_seasons_in_3_seasons(self):
+        self.assertEqual((careers.CAREER_MINUTES, careers.TWIN_MINUTES, careers.CAREER_SEASONS), (0, 1350, 3))  # #29 decisions 2-3
+        self.assertEqual(careers.career_profiles(peer_groups()), [])  # real: no sample player has 3 seasons of 1,350+ minutes
+        # real: Salah's ENG 2023/24 stint (1,197) is under 1,350, so with the season rule at 1 his career is ENG 2017/18 alone.
+        (salah,) = [career for career in careers.career_profiles(peer_groups(), career_seasons=1) if career.player_id == SALAH]
+        self.assertEqual((salah.minutes, salah.season_count), (2414, 1))
+        self.assertNotIn(SALAH, [career.player_id for career in careers.career_profiles(peer_groups(), career_seasons=2)])
+        self.assertIn(SALAH, [career.player_id for career in careers.career_profiles(peer_groups(), eligible_minutes=1197, career_seasons=2)])
 
 
 class CareerProfiles(unittest.TestCase):

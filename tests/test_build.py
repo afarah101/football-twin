@@ -149,14 +149,14 @@ class CareerFile(unittest.TestCase):
     def test_the_build_writes_a_career_file_and_marks_each_season_entry(self):
         content = written_files()[f"private/{build.CAREER_FILE}"]
         self.assertEqual(set(content), CAREER_FILE_KEYS)
-        self.assertEqual((content["source"], content["metrics"], content["career_minutes"]), ("standin", list(profiles.METRICS), 6000))
-        self.assertEqual(content["careers"], [])  # real: no sample career reaches 6,000 minutes
+        self.assertEqual((content["source"], content["metrics"], content["career_minutes"]), ("standin", list(profiles.METRICS), 0))
+        self.assertEqual(content["careers"], [])  # real: no sample player has 3 seasons of 1,350+ minutes (#29)
         # D30-8: so every sample player keeps season twins only.
         self.assertEqual({entry["career"] for found in built_files().values() for entry in found["player_seasons"]}, {False})
 
     def test_career_entries_hold_the_career_profile_percentiles_and_lists(self):
-        # Real sample careers with the bar at the Pool's 900 minutes, since none reaches 6,000.
-        found = careers.career_profiles(profiles.peer_group_profiles(loaded().player_seasons, loaded().shots), career_minutes=900)
+        # Real sample careers with the rules at the Pool's 900 minutes and 1 season, since none meets #29's rules.
+        found = careers.career_profiles(profiles.peer_group_profiles(loaded().player_seasons, loaded().shots), career_minutes=900, eligible_minutes=900, career_seasons=1)
         content = build.career_file(loaded(), found, 900)
         self.assertEqual(content["career_minutes"], 900)
         percentiles, lists = careers.career_percentiles(found), careers.career_lists(found)

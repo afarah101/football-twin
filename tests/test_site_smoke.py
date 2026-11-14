@@ -78,7 +78,7 @@ class SiteSmoke(unittest.TestCase):
                     page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
                     page.goto(f"http://127.0.0.1:{server.server_address[1]}/")
 
-                    # Real: Mohamed Salah holds two Pool seasons in the sample and no career at 6,000 minutes:
+                    # Real: Mohamed Salah holds two Pool seasons in the sample and no career under the #29 rules:
                     # one search row (D30-13), which opens his latest season, with a link to each of his seasons.
                     page.fill("#search", "salah")
                     results = page.locator("#results button")
@@ -133,7 +133,7 @@ class SiteSmoke(unittest.TestCase):
                     expect(page.locator("#player-meta")).to_contain_text("ENG 2023/24")
                     expect(page.locator("#player")).to_contain_text("Darwin Núñez")
                     expect(page.locator("#player")).to_contain_text(SMALL_SAMPLE)
-                    # D30-8: under 6,000 career minutes, so the season view, headed "Season twins".
+                    # D30-8: no #29 career, so the season view, headed "Season twins".
                     expect(page.locator("#player h3", has_text=SEASON_TWINS)).to_be_visible()
                     expect(page.locator("#career")).to_be_hidden()
                     for text in HOW_IT_WORKS:
