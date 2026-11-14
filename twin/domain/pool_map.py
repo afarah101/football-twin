@@ -8,6 +8,18 @@ import numpy as np
 MAP_DECIMALS = 3
 
 
+def pca_summary(peer_groups):
+    """(explained variance shares of the 2 map components, their loadings in METRICS order): plan step 6 prints these."""
+    z = np.array([member.values for _, profiles in sorted(peer_groups.items()) for member in profiles], dtype=float)
+    if len(z) < 3:
+        return [], []
+    centred = z - z.mean(axis=0)
+    _, values, components = np.linalg.svd(centred, full_matrices=False)
+    axes = components[:2] * np.sign(components[np.arange(2), np.abs(components[:2]).argmax(axis=1)])[:, None]
+    variance = values ** 2
+    return [float(share) for share in (variance / variance.sum())[:2]], [[round(float(value), MAP_DECIMALS) for value in row] for row in axes]
+
+
 def pca_points(peer_groups):
     """[(league, season, player_id, x, y)] for every MetricProfile, PCA fitted on the whole Pool."""
     members = [member for _, profiles in sorted(peer_groups.items()) for member in profiles]

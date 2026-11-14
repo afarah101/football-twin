@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests"))
 from test_site_data import data_files, sample_site
-from twin.domain.pool_map import pca_points
+from twin.domain.pool_map import pca_points, pca_summary
 
 
 def member(player_id, values, league="ENG", season=2023):
@@ -36,6 +36,17 @@ class PcaPoints(unittest.TestCase):
 
     def test_hand_made_too_few_members_gives_no_map(self):
         self.assertEqual(pca_points({("ENG", 2023): [member("p0", (1.0, 2.0))]}), [])
+
+
+class PcaSummary(unittest.TestCase):
+    def test_the_build_prints_loadings_and_explained_variance(self):
+        from test_build import loaded
+        from twin.domain.profiles import METRICS, peer_group_profiles
+        found = loaded()
+        shares, loadings = pca_summary(peer_group_profiles(found.player_seasons, found.shots))
+        self.assertEqual((len(shares), [len(row) for row in loadings]), (2, [len(METRICS)] * 2))
+        self.assertGreaterEqual(shares[0], shares[1])
+        self.assertTrue(all(max(row, key=abs) > 0 for row in loadings))  # the same sign rule as the map points
 
 
 class MapFile(unittest.TestCase):
