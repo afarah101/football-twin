@@ -1,5 +1,6 @@
 """#12: the Pool map. PCA on the Pool's z-scores, published as its own file, with no axis named.
 
+The PCA rule uses small hand-made inputs: they say so in their names and never go in tests/fixtures/.
 Run from the repo root: python3 -m unittest tests.test_pool_map
 """
 import json
@@ -20,8 +21,8 @@ def member(player_id, values, league="ENG", season=2023):
 
 
 class PcaPoints(unittest.TestCase):
-    def test_synthetic_points_spread_along_the_first_component(self):
-        # synthetic: 5 players on a line in 3 metrics; the first component holds all the spread.
+    def test_hand_made_points_spread_along_the_first_component(self):
+        # hand-made (the sample cannot show an exact line): 5 players on a line in 3 metrics; the first component holds all the spread.
         groups = {("ENG", 2023): [member(f"p{k}", (k, 2 * k, 0.0)) for k in range(5)]}
         points = pca_points(groups)
         self.assertEqual([point[2] for point in points], ["p0", "p1", "p2", "p3", "p4"])
@@ -29,11 +30,11 @@ class PcaPoints(unittest.TestCase):
         self.assertEqual(xs, sorted(xs))  # the sign rule makes the largest loading positive, so p4 sits right
         self.assertTrue(all(abs(y) < 1e-9 for y in ys))
 
-    def test_synthetic_the_same_input_gives_the_same_map(self):
+    def test_hand_made_the_same_input_gives_the_same_map(self):
         groups = {("ENG", 2023): [member(f"p{k}", (k % 3, k * 0.5, -k)) for k in range(6)]}
         self.assertEqual(pca_points(groups), pca_points(groups))
 
-    def test_synthetic_too_few_members_gives_no_map(self):
+    def test_hand_made_too_few_members_gives_no_map(self):
         self.assertEqual(pca_points({("ENG", 2023): [member("p0", (1.0, 2.0))]}), [])
 
 
