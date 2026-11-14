@@ -243,9 +243,10 @@ class CantCheck(unittest.TestCase):
         self.assert_reason(extraction(name="Nobody", words=["majestic"], seasons_named="in 2015/16"), "subject not in data")
 
     def test_synthetic_a_claim_type_this_ticket_does_not_build_stops_with_an_error(self):
-        # Goalscoring is per-season (#44): an error, never a wrong Verdict.
+        # Chance creation is a season-totals Claim type (#45), not built yet: an error, never a wrong Verdict.
+        # (Until #44 this test used Goalscoring, which #44 now builds.)
         with self.assertRaises(NotImplementedError):
-            self.world.check(extraction(words=["prolific"]))
+            self.world.check(extraction(words=["creative"]))
 
 
 class PooledClaimTypes(unittest.TestCase):

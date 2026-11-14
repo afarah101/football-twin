@@ -3,6 +3,8 @@
 Rules: Reference groups (Q7, D1-D2), the shot minimum (Q7), the bootstrap and strict Verdict rule (Q9, ADR 0003), polarity
 (Q5), the fail-safe reasons in check order and the coverage line (Q12, Q13). Per-season, season-totals, team and league
 Claim types come in #44, #45 and #46: until then they stop with an error, never a Verdict.
+Per-season player Verdicts (#44): Shot volume, Goal threat, Goalscoring, Aerial threat (2 Main metrics) and Availability.
+Each qualifying season is a test against that season's Reference group (D1), bootstrapped over the Subject's PlayerMatches.
 """
 import random
 from collections import Counter, defaultdict
@@ -20,8 +22,8 @@ QUALIFY_MINUTES = 900
 PLAYER_REFERENCE_MINIMUM = 30
 SHOT_MINIMUM = 40  # proposed by the spec's measurement; Ahmed's freeze ticket (#38) may change it
 RESAMPLES, SEED, INTERVAL = 1000, 43, 80
-METHOD = (f"method stand-in-1: Pooled metrics over shots, bootstrap of {RESAMPLES:,} resamples of the Subject's shots, seed {SEED}, "
-          f"{INTERVAL}% interval, Twin's mid-rank percentiles")
+METHOD = (f"method stand-in-2: bootstrap of {RESAMPLES:,} resamples of the Subject's shots (Pooled metrics) or PlayerMatches "
+          f"(per-season metrics), seed {SEED}, {INTERVAL}% interval, Twin's mid-rank percentiles")
 DATA_END = "Data to 2023/24"
 PRESENT_WARNING = "Our data ends in 2023/24. This verdict may not match the current season."
 SUPPORTED, MIXED, NOT_SUPPORTED, CANT = "Supported", "Mixed", "Not supported", "Can't check with this data"
@@ -60,6 +62,45 @@ POOLED = {
 }
 
 
+def per_90(count, matches):
+    minutes = sum(found.minutes for found in matches)
+    return 90 * count / minutes if minutes else 0.0
+
+
+def np_shots(matches):
+    return [shot for found in matches for shot in found.shots if counts_for_metrics(shot)]
+
+
+def is_header(shot):
+    return shot.shot_type == "Head"
+
+
+@dataclass(frozen=True)
+class SeasonMetric:
+    """One Main metric of a per-season Claim type. `value` takes one PlayerSeason's PlayerMatches and the league-season's match count."""
+    name: str
+    value: object
+    unit: str
+
+
+PER_SEASON = {  # spec "Claim-type catalogue, players"
+    "Shot volume": (SeasonMetric("non-penalty shots per 90", lambda m, n: per_90(len(np_shots(m)), m), "{:.2f} non-penalty shots per 90"),),
+    "Goal threat": (SeasonMetric("npxG per 90", lambda m, n: per_90(sum(shot.xg for shot in np_shots(m)), m), "{:.2f} npxG per 90"),),
+    "Goalscoring": (SeasonMetric("non-penalty goals per 90", lambda m, n: per_90(sum(shot.result == "Goal" for shot in np_shots(m)), m),
+                                 "{:.2f} non-penalty goals per 90"),),
+    "Aerial threat": (
+        SeasonMetric("headed shots per 90", lambda m, n: per_90(sum(map(is_header, np_shots(m))), m), "{:.2f} headed shots per 90"),
+        SeasonMetric("headed npxG per 90", lambda m, n: per_90(sum(shot.xg for shot in np_shots(m) if is_header(shot)), m), "{:.3f} headed npxG per 90"),
+    ),
+    # Share of league minutes played: the Subject's minutes over the league-season's matches per club x 90.
+    "Availability": (SeasonMetric("share of league minutes played", lambda m, n: sum(found.minutes for found in m) / (90 * n) if n else 0.0,
+                                  "{:.1%} of league minutes"),),
+}
+CONTEXT = {  # shown, never the Verdict (spec: Context metric column)
+    "Aerial threat": ("header share of shots", lambda m: (sum(map(is_header, np_shots(m))) / len(np_shots(m))) if np_shots(m) else 0.0, "{:.0%} of shots headed"),
+}
+
+
 @dataclass(frozen=True)
 class Test:
     value: float
@@ -68,6 +109,9 @@ class Test:
     percentile: float  # mid-rank, in the Claim's direction (D3)
     interval: tuple  # (low, high): the 80% interval of the resampled percentile
     outcome: str  # meets, misses or borderline
+    label: Optional[str] = None  # per-season tests: the season, and the Main metric when there are 2
+    matches: Optional[int] = None  # per-season tests: the PlayerMatches resampled
+    reference_size: Optional[int] = None  # per-season tests: that season's peers
 
 
 @dataclass(frozen=True)
@@ -97,6 +141,7 @@ class ReadingVerdict:
     coverage: Optional[str] = None
     thin: bool = False
     seasons_alone: tuple = ()  # context only, never the Verdict
+    tests: tuple = ()  # per-season Claim types: one Test per qualifying season (and per Main metric)
 
 
 @dataclass(frozen=True)
@@ -210,11 +255,14 @@ def check(claim, raw, player_seasons, player_matches):
         return subject_cant("held for review")
 
     line_minutes, line_latest, shots_of, keys_of = defaultdict(Counter), defaultdict(dict), defaultdict(list), defaultdict(set)
+    matches_of, club_matches = defaultdict(list), defaultdict(set)
     for found in player_matches:
+        club_matches[(found.league, found.season, found.club)].add(found.match)
         key = (found.league, found.season, found.player_id)
         if key not in qualifying:
             continue
         keys_of[found.player_id].add(key)
+        matches_of[key].append(found)
         shots_of[key].extend(shot for shot in found.shots if counts_for_metrics(shot))
         if found.line is not None:  # substitute appearances count for minutes, not for a Line
             line_minutes[found.player_id][found.line] += found.minutes
@@ -226,13 +274,20 @@ def check(claim, raw, player_seasons, player_matches):
     if line is None:
         return subject_cant("peer group too small", "no start in the Window, so no Line")
 
-    verdicts = tuple(reading_verdict(reading, latest, person, window, league, line, lines, in_scope, qualifying, keys_of, shots_of, polarity) for reading in readings)
+    season_matches = Counter()  # matches per club in each league-season: the Availability denominator
+    for (found_league, found_season, _), played in club_matches.items():
+        season_matches[(found_league, found_season)] = max(season_matches[(found_league, found_season)], len(played))
+    data = dict(keys_of=keys_of, shots_of=shots_of, matches_of=matches_of, season_matches=season_matches)
+    verdicts = tuple(reading_verdict(reading, latest, person, window, league, line, lines, in_scope, qualifying, data, polarity) for reading in readings)
     return ClaimVerdict(claim, raw, latest.name, polarity, verdicts, warning)
 
 
-def reading_verdict(reading, latest, person, window, league, line, lines, in_scope, qualifying, keys_of, shots_of, polarity):
+def reading_verdict(reading, latest, person, window, league, line, lines, in_scope, qualifying, data, polarity):
+    if reading.claim_type in PER_SEASON:
+        return season_verdict(reading, latest, person, window, league, line, lines, in_scope, qualifying, data, polarity)
     if reading.claim_type not in POOLED:
-        raise NotImplementedError(f"{reading.claim_type}: per-season tests come in #44, season totals in #45")
+        raise NotImplementedError(f"{reading.claim_type}: season totals come in #45")
+    keys_of, shots_of = data["keys_of"], data["shots_of"]
     metric = POOLED[reading.claim_type]
 
     def sample(player):
@@ -286,3 +341,88 @@ def reading_verdict(reading, latest, person, window, league, line, lines, in_sco
     )
     return ReadingVerdict(verdict=verdict, reason="the range crosses the line" if outcome == "borderline" else None, claim_query=query,
                           test=Test(value, metric.unit.format(value), len(shots), point, (low, high), outcome), seasons_alone=seasons_alone, **common)
+
+
+def threshold_words(reading, main_metric):
+    level = reading.level_word.capitalize() if reading.level_word else "No level word"
+    lowest = ", counted from the lowest value" if reading.direction == "less" else ""
+    return f"{level} = {reading.threshold.words()} of the peer group on {main_metric}{lowest}."
+
+
+def match_bootstrap(matches, value, peer_values, direction):
+    """The 80% interval of the percentile over RESAMPLES resamples of the Subject's PlayerMatches, against the fixed peers."""
+    draw = random.Random(SEED)
+    found = sorted(percentile_of(value(draw.choices(matches, k=len(matches))), peer_values, direction) for _ in range(RESAMPLES))
+    tail = RESAMPLES * (100 - INTERVAL) // 200
+    return found[tail], found[RESAMPLES - 1 - tail]
+
+
+def combine(outcomes, unit):
+    """The strict rule (Q9, ADR 0003): Supported if every test meets, Not supported if every test misses, else Mixed with one line why."""
+    if all(outcome == "meets" for outcome in outcomes):
+        return SUPPORTED, None
+    if all(outcome == "misses" for outcome in outcomes):
+        return NOT_SUPPORTED, None
+    if "borderline" in outcomes:
+        return MIXED, "the range crosses the line"
+    meets = sum(outcome == "meets" for outcome in outcomes)
+    return MIXED, f"{meets} of {len(outcomes)} {unit} meet the threshold"
+
+
+def season_verdict(reading, latest, person, window, league, line, lines, in_scope, qualifying, data, polarity):
+    """A per-season Claim type (#44): one Test per qualifying season and Main metric, combined by the strict rule."""
+    keys_of, matches_of, season_matches = data["keys_of"], data["matches_of"], data["season_matches"]
+    metrics = PER_SEASON[reading.claim_type]
+    main_metric = " and ".join(metric.name for metric in metrics)
+    threshold = threshold_words(reading, main_metric)
+    used, skipped, tests, context, sizes = [], [], [], [], []
+    for season in window:
+        own = [found for found in in_scope.values() if found.player_id == person and found.season == season]
+        if not any(found.minutes >= QUALIFY_MINUTES for found in own):
+            skipped.append(f"{season_label(season)} not enough minutes")
+            continue
+        own_keys = [key for key in keys_of[person] if key[1] == season]
+        if not own_keys:
+            skipped.append(f"{season_label(season)} held for review")
+            continue
+        # One season, one test: a Subject qualifying in 2 leagues in a season is tested on the league with more minutes.
+        key = max(own_keys, key=lambda key: sum(found.minutes for found in matches_of[key]))
+        matches, count = matches_of[key], season_matches[(key[0], key[1])]
+        peers = []  # one test per peer too: a peer in 2 leagues in the season counts once, in the league with more minutes
+        for player, peer_line in lines.items():
+            found = [peer_key for peer_key in keys_of[player] if peer_key[1] == season] if player != person and peer_line == line else []
+            if found:
+                peers.append(max(found, key=lambda peer_key: sum(match.minutes for match in matches_of[peer_key])))
+        if len(peers) < PLAYER_REFERENCE_MINIMUM:
+            skipped.append(f"{season_label(season)} peer group too small ({len(peers)} peers)")
+            continue
+        used.append(season)
+        sizes.append(len(peers))
+        for metric in metrics:
+            peer_values = [metric.value(matches_of[peer_key], season_matches[(peer_key[0], peer_key[1])]) for peer_key in peers]
+            value = metric.value(matches, count)
+            point = percentile_of(value, peer_values, reading.direction)
+            low, high = match_bootstrap(matches, lambda sample: metric.value(sample, count), peer_values, reading.direction)
+            label = season_label(season) + (f", {metric.name}" if len(metrics) > 1 else "")
+            tests.append(Test(value, metric.unit.format(value), len(np_shots(matches)), point, (low, high),
+                              reading.threshold.outcome(low, high, len(peer_values) + 1), label, len(matches), len(peer_values)))
+        if reading.claim_type in CONTEXT:
+            name, value, unit = CONTEXT[reading.claim_type]
+            context.append(f"{season_label(season)}: {unit.format(value(matches))}")
+    coverage = f"Based on {len(used)} of {len(window)} season{'s' if len(window) > 1 else ''}" + (f": {', '.join(skipped)}." if skipped else ".")
+    scope = LEAGUE_NAMES[league] if league else "the top 5 leagues"
+    reference = (f"vs {LINE_WORDS[line]} in {scope}, each season's {QUALIFY_MINUTES}+ minute players"
+                 + (f": {min(sizes)}-{max(sizes)} players per season" if sizes else ""))
+    common = dict(claim_type=reading.claim_type, threshold=threshold, seasons=window_label(window), coverage=coverage,
+                  thin=len(used) < len(window) / 2, reference_group=reference, reference_size=min(sizes) if sizes else 0)
+    if not tests:
+        if any("peer group too small" in found for found in skipped):
+            return ReadingVerdict(verdict=CANT, reason="peer group too small", detail=f"the minimum is {PLAYER_REFERENCE_MINIMUM} peers per season", **common)
+        return ReadingVerdict(verdict=CANT, reason="too few minutes", **common)
+    verdict, why = combine([test.outcome for test in tests], "seasons" if len(metrics) == 1 else "tests")
+    if polarity == "negated":
+        verdict = FLIP.get(verdict, verdict)
+    query = ClaimQuery(latest.name, person, reading.claim_type, main_metric, reading.direction, reading.threshold.words(),
+                       (window[0], window[-1]), {"league": league, "line": line})
+    return ReadingVerdict(verdict=verdict, reason=why, claim_query=query, tests=tuple(tests),
+                          seasons_alone=tuple(f"{CONTEXT[reading.claim_type][0]}, {found}" for found in context) if context else (), **common)
