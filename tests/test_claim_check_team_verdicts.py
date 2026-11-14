@@ -119,6 +119,20 @@ class TeamVerdicts(unittest.TestCase):
         self.assertEqual(run(world).readings[0].reason, "subject is ambiguous")
 
 
+class TeamMethodChoices(unittest.TestCase):
+    def test_synthetic_a_league_the_team_did_not_play_in_is_subject_not_in_data(self):
+        reading = run(league_world(), reference_named="in La Liga").readings[0]
+        self.assertEqual((reading.reason, reading.detail), ("subject not in data", "Solid Town in La Liga"))
+
+    def test_synthetic_a_team_in_2_leagues_is_tested_in_its_latest_league(self):
+        world = league_world(2023)
+        for k in range(TEAMS - 1):
+            world += team_season("ESP", 2022, f"Spain Club{k}", 1.0 + k / 10, 1.0 + k / 10)
+        world += team_season("ESP", 2022, "Solid Town", 1.5, 2.5)  # leaky in Spain the season before
+        reading = run(world, seasons_named="2022/23-2023/24").readings[0]
+        self.assertEqual((reading.verdict, reading.claim_query.reference_group["league"]), (SUPPORTED, "ENG"))
+
+
 class LeagueVerdicts(unittest.TestCase):
     def world(self, top=2.0):
         found = []
@@ -141,6 +155,14 @@ class LeagueVerdicts(unittest.TestCase):
     def test_synthetic_a_bare_league_word_is_cant(self):
         reading = run(self.world(), name="Premier League", words=["open"], kind="league").readings[0]
         self.assertEqual((reading.verdict, reading.reason), (CANT, "level word does not fit a 5-league comparison"))
+
+    def test_synthetic_a_rank_range_that_crosses_the_line_is_mixed(self):
+        # ENG level with the next league on average, with a wide spread: the resampled ranks cross rank 1.
+        world = [found for found in self.world() if found.league != "ENG"]
+        for k in range(TEAMS):
+            world += team_season("ENG", 2023, f"ENG Club{k}", 0.7, 0.7, wobble=0.6)
+        reading = run(world, name="Premier League", words=["the", "most", "open"], kind="league").readings[0]
+        self.assertEqual((reading.verdict, reading.test.outcome), (MIXED, "borderline"))
 
     def test_synthetic_four_leagues_is_too_few(self):
         world = [found for found in self.world() if found.league != LEAGUES[-1]]
