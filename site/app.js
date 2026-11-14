@@ -91,6 +91,34 @@ function showView(id) {
   byId("career").hidden = id !== "career";
 }
 
+// #12: the Pool map, PCA on every Pool season. Points only: no axis is named.
+let poolMap = null;
+const MAP_SIZE = 360;
+
+function drawMap(entry, content, twins) {
+  if (!poolMap || !poolMap.points.length) return document.createTextNode("Map not available.");
+  const xs = poolMap.points.map((point) => point[3]);
+  const ys = poolMap.points.map((point) => point[4]);
+  const [minX, maxX, minY, maxY] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  const scale = (value, low, high) => 8 + ((value - low) / ((high - low) || 1)) * (MAP_SIZE - 16);
+  const at = (point) => [scale(point[3], minX, maxX), MAP_SIZE - scale(point[4], minY, maxY)];
+  const key = (league, season, playerId) => `${league}|${season}|${playerId}`;
+  const twinKeys = new Set(twins.map((twin) => key(twin.league, twin.season, twin.player_id)));
+  const own = key(content.league, content.season, entry.player_id);
+  const svg = svgElement("svg", { id: "pool-map", viewBox: `0 0 ${MAP_SIZE} ${MAP_SIZE}`, role: "img",
+    "aria-label": `Map of every attacker by style: ${entry.name} and ${twins.length} twins marked` });
+  const marked = [];
+  for (const point of poolMap.points) {
+    const id = key(point[0], point[1], point[2]);
+    const [x, y] = at(point);
+    if (id === own || twinKeys.has(id)) marked.push([id === own ? "map-player" : "map-twin", x, y]);
+    else svg.append(svgElement("circle", { cx: x, cy: y, r: 1.5, class: "map-point" }));
+  }
+  marked.sort((a, b) => (a[0] === "map-player") - (b[0] === "map-player"));  // the player on top
+  for (const [cls, x, y] of marked) svg.append(svgElement("circle", { cx: x, cy: y, r: cls === "map-player" ? 6 : 4, class: cls }));
+  return svg;
+}
+
 function renderTwins() {
   const list = byId("twins");
   const sameLeague = byId("same-league").checked;
@@ -104,6 +132,7 @@ function renderTwins() {
   if (!twins.length) list.replaceChildren(Object.assign(document.createElement("li"), { textContent: "No twins in this league." }));
   const more = byId("show-more");
   more.hidden = showAll || twins.length <= SHOWN;
+  byId("map-box").replaceChildren(drawMap(current.entry, current.content, twins.slice(0, showAll ? STORED : SHOWN)));
 }
 
 // D30-13: one link per Pool PlayerSeason, so a two-stint season shows as two links (#11).
@@ -198,6 +227,7 @@ async function start() {
   byId("show-more").addEventListener("click", () => { showAll = true; renderTwins(); });
   byId("same-role").addEventListener("change", () => { showAll = false; renderCareerTwins(); });
   byId("career-show-more").addEventListener("click", () => { showAll = true; renderCareerTwins(); });
+  readJson("data/map.json").then((found) => { poolMap = found; if (current) renderTwins(); }).catch(() => { poolMap = null; });
   try {
     names = await readJson("data/names.json");
   } catch (error) {

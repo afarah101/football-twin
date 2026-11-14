@@ -108,6 +108,12 @@ class SiteSmoke(unittest.TestCase):
                         self.assertRegex(twins.nth(index).inner_text(), r"closer than \d+(\.\d)?% of same-league pairs")
                     page.uncheck("#same-league")
                     expect(twins.first).to_contain_text("of all pairs")
+                    # #12: the map marks the player and the twins on show, and names no axis.
+                    pool_map = page.locator("svg#pool-map")
+                    expect(pool_map).to_have_count(1)
+                    expect(pool_map.locator("circle.map-player")).to_have_count(1)
+                    expect(pool_map.locator("circle.map-twin")).to_have_count(5)
+                    expect(pool_map.locator("text")).to_have_count(0)
                     # D30-14: the season Fingerprint is in Build percentiles within its league-season.
                     fingerprint = page.locator("svg#fingerprint")
                     expect(fingerprint).to_have_count(1)

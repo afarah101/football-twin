@@ -11,7 +11,7 @@ import json
 import shutil
 from pathlib import Path
 
-from twin.application.build import CAREER_FILE
+from twin.application.build import CAREER_FILE, MAP_FILE
 from twin.domain.twins import percentiles
 
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -122,6 +122,9 @@ def write_site(profile_paths, folder=SITE_FOLDER):
         write_json(data / f"{content['league']}_{content['season']}.json", site_file(content))
     built = json.loads((profile_paths[0].parent / CAREER_FILE).read_text(encoding="utf8")) if profile_paths else {"careers": []}
     write_json(data / "names.json", name_index(contents, built["careers"]))
+    if profile_paths and (profile_paths[0].parent / MAP_FILE).exists():  # #12: the Pool map, copied as its own file
+        built_map = json.loads((profile_paths[0].parent / MAP_FILE).read_text(encoding="utf8"))
+        write_json(data / MAP_FILE, {"columns": built_map["columns"], "points": built_map["points"]})
     if profile_paths:
         (data / "careers").mkdir()
         for career in built["careers"]:

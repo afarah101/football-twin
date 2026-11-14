@@ -88,7 +88,7 @@ def names(site=sample_site):
 
 def data_files(site=sample_site):
     """The league-season files."""
-    return {path: json.loads(text) for path, text in site().items() if path.startswith("data/") and path != "data/names.json" and not path.startswith("data/careers/")}
+    return {path: json.loads(text) for path, text in site().items() if path.startswith("data/") and path not in ("data/names.json", "data/map.json") and not path.startswith("data/careers/")}
 
 
 def career_files(site=career_site):
