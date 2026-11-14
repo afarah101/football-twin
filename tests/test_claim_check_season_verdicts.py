@@ -52,6 +52,12 @@ def only(verdict):
 
 
 class PerSeasonTests(unittest.TestCase):
+    def test_synthetic_a_peer_in_2_leagues_in_a_season_counts_once(self):
+        world = SeasonWorld().peers(2023)
+        world.add("peer0", "Peer Number0", 2023, shots=0, league="ESP", club="Other")  # peer0 also has 1,800 minutes in Spain
+        world.add("subj", "Subject Person", 2023, shots=200)
+        self.assertEqual(only(world.check(("shoots", "a", "lot"))).tests[0].reference_size, 32)
+
     def test_synthetic_one_test_per_qualifying_season(self):
         world = SeasonWorld()
         for season in (2021, 2022, 2023):
