@@ -11,6 +11,7 @@ Local parts only. The outside review and the blind spot-check (Q12, Q22) need a 
 - The correlation matrix and the PCA loadings with explained variance are printed. The Basketball method (Q20) is reported beside.
 Usage: python3 -m twin.application.validation  (the stand-in run; the report goes to build/private/, never to the site)
 """
+import csv
 import math
 import random
 from dataclasses import dataclass
@@ -57,7 +58,9 @@ def wilson(hits, tests, z=Z_95):
 
 def check_cross_season_ids(path=REVIEW_DECISIONS):
     """#10: an approved cross_season_ids row would make one person read as two players, so the report stops and Ahmed decides."""
-    count = sum(line.startswith("cross_season_ids,") for line in path.read_text(encoding="utf8").splitlines()) if path.exists() else 0
+    # The same rows as the issue's `grep -c '^cross_season_ids,'`, read as CSV so quoting cannot hide one.
+    rows = list(csv.DictReader(path.read_text(encoding="utf8").splitlines())) if path.exists() else []
+    count = sum(row.get("item_type") == "cross_season_ids" for row in rows)
     if count:
         raise ValidationStopped(f"validation: {count} approved cross_season_ids row(s) in {path.name}, so two ids may be one player. Ahmed decides.")
     return count
@@ -126,8 +129,16 @@ def split(found):
     return choose, judge
 
 
+def average_ranks(values):
+    """Ranks with ties given their mean rank, as Spearman needs."""
+    values = np.asarray(values)
+    _, inverse, counts = np.unique(values, return_inverse=True, return_counts=True)
+    ends = np.cumsum(counts)
+    return ((ends - counts + ends - 1) / 2)[inverse]
+
+
 def spearman(a, b):
-    ranks_a, ranks_b = np.argsort(np.argsort(a)), np.argsort(np.argsort(b))
+    ranks_a, ranks_b = average_ranks(a), average_ranks(b)
     if np.std(ranks_a) == 0 or np.std(ranks_b) == 0:
         return 1.0
     return float(np.corrcoef(ranks_a, ranks_b)[0, 1])
@@ -193,7 +204,7 @@ def validation_report(peer_groups):
                      f"{low:.1%}-{high:.1%} | {judged.baseline:.1%} | {band(judged.rate) if method not in COMPARISON_METHODS else '-'} |")
     lines += ["", f"Winning method (highest choose rate): **{winner}**, judged **{band(results[winner][1].rate)}**.", ""]
     z = vectors["euclidean"]
-    lines += ["## Stability (report-only, Q21)", "", f"Mean Spearman correlation of {min(STABILITY_ROWS, len(z))} sampled rows' distances with one metric dropped (seed {STABILITY_SEED}).", ""]
+    lines += ["## Stability (report-only, Q21)", "", f"Mean Spearman correlation of {min(STABILITY_ROWS, len(z))} sampled rows' euclidean z-score distances with one metric dropped (seed {STABILITY_SEED}). Every method shares these z-scores except Basketball.", ""]
     found = stability(z)
     flag = min(found, key=found.get)
     lines += [f"- {metric}: {value:.3f}" + (" (changes the rankings most: flag for the outside review)" if metric == flag else "") for metric, value in found.items()]

@@ -85,14 +85,20 @@ class Report(unittest.TestCase):
     def test_an_approved_cross_season_ids_row_stops_the_report(self):
         with TemporaryDirectory() as folder:
             path = Path(folder) / "review_decisions.csv"
-            path.write_text("kind,detail\ncross_season_ids,a|b\n", encoding="utf8")
+            path.write_text("item_type,key,decision\ncross_season_ids,a|b,approve\n", encoding="utf8")
             with self.assertRaises(validation.ValidationStopped):
                 validation.check_cross_season_ids(path)
-            path.write_text("kind,detail\n", encoding="utf8")
+            path.write_text('item_type,key,decision\nname_map,"cross_season_ids, quoted",approve\n', encoding="utf8")
             self.assertEqual(validation.check_cross_season_ids(path), 0)
 
     def test_the_committed_review_decisions_have_no_cross_season_ids_row(self):
+        header = validation.REVIEW_DECISIONS.read_text(encoding="utf8").splitlines()[0]
+        self.assertTrue(header.startswith("item_type,"))  # the check reads the real column layout
         self.assertEqual(validation.check_cross_season_ids(), 0)
+
+    def test_spearman_averages_tied_ranks(self):
+        self.assertEqual(list(validation.average_ranks([3, 1, 3, 2])), [2.5, 0.0, 2.5, 1.0])
+        self.assertAlmostEqual(validation.spearman([1, 2, 2, 3], [1, 2, 2, 3]), 1.0)
 
     def test_the_report_goes_to_build_private_only(self):
         self.assertEqual(validation.REPORT.relative_to(ROOT).parts[:2], ("build", "private"))
