@@ -14,6 +14,10 @@ LINE_OF_POSITION = {
 SET_PIECE_SITUATIONS = ("FromCorner", "SetPiece", "DirectFreekick")  # spec Q4: set-piece xG
 
 
+class UnknownPosition(ValueError):
+    """A Fault: a start's first-listed position is not in the Line table, so its Line is unknown. The run stops; it never gets "no Line"."""
+
+
 @dataclass(frozen=True)
 class PlayerMatch:
     """One player's part in one match. Minutes count from every appearance, and a substitute appearance has no Line."""
@@ -33,7 +37,11 @@ class PlayerMatch:
 
     @property
     def line(self) -> Optional[str]:
-        return None if self.substitute else LINE_OF_POSITION.get(self.position)
+        if self.substitute:
+            return None
+        if self.position not in LINE_OF_POSITION:
+            raise UnknownPosition(f"PlayerMatch {'|'.join(map(str, self.key))}: position {self.position!r} is not in the Line table (Q7)")
+        return LINE_OF_POSITION[self.position]
 
 
 @dataclass(frozen=True)
