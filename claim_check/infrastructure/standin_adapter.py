@@ -10,7 +10,7 @@ import pandas as pd
 
 from claim_check.domain.records import SET_PIECE_SITUATIONS, PlayerMatch, TeamMatch
 from twin.domain.pool import in_pool
-from twin.domain.profiles import counts_for_metrics
+from twin.domain.profiles import SHARE_TESTS, counts_for_metrics
 from twin.domain.records import Shot
 from twin.infrastructure.standin.loader import load_standin, text
 from twin.infrastructure.standin.player_join import StandinFiles, link_matches, load_shots, position_minutes, read_events, shot_groups, understat_to_fbref_clubs
@@ -44,20 +44,23 @@ def substitute_rows(positions, events):
 
 def team_matches(shot_records, groups, positions, linked):
     """Two TeamMatches per linked match, summed from every shot row in it, joined to a player or not."""
-    sums = defaultdict(lambda: [0.0, 0.0, 0])
+    sums = defaultdict(lambda: [0.0, 0.0, 0, 0, 0])
     for shot, group in zip(shot_records, groups):
         if group is not None and counts_for_metrics(shot):
             found = sums[(group.match, group.club)]
             found[0] += shot.xg
             found[1] += shot.xg if shot.situation in SET_PIECE_SITUATIONS else 0.0
             found[2] += 1
+            found[3] += shot.result == "Goal"
+            found[4] += SHARE_TESTS["outside_box_share"](shot)
     records = []
     for row in positions.drop_duplicates("match").itertuples():
         if row.match not in linked:
             continue
         for team, opponent in ((row.Home_Team, row.Away_Team), (row.Away_Team, row.Home_Team)):
             own, other = sums[(row.match, team)], sums[(row.match, opponent)]
-            records.append(TeamMatch(row.league, int(row.Season_End_Year) - 1, row.match, team, opponent, own[0], other[0], own[1], other[1], own[2], other[2]))
+            records.append(TeamMatch(row.league, int(row.Season_End_Year) - 1, row.match, team, opponent, own[0], other[0], own[1], other[1], own[2], other[2],
+                                     own[3], other[3], own[4], other[4]))
     return tuple(records)
 
 

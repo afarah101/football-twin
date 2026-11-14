@@ -58,3 +58,7 @@ class TeamMatch:
     set_piece_xg_against: float
     shots_for: int
     shots_against: int
+    goals_for: int = 0  # non-penalty goals, own goals left out (#46: Team finishing, context)
+    goals_against: int = 0
+    outside_box_shots_for: int = 0  # #46: the Long-shot league share
+    outside_box_shots_against: int = 0

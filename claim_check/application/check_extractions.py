@@ -7,4 +7,4 @@ from twin.infrastructure.standin.player_join import StandinFiles
 def check_extractions(inputs, files=StandinFiles(), season_checks=True):
     """(the stand-in's matches, one ClaimVerdict per {"claim", "extraction"} input). The stand-in is loaded once."""
     matches = load_matches(files, season_checks)
-    return matches, [check(found["claim"], found["extraction"], matches.loaded.player_seasons, matches.player_matches) for found in inputs]
+    return matches, [check(found["claim"], found["extraction"], matches.loaded.player_seasons, matches.player_matches, matches.team_matches) for found in inputs]
